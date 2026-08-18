@@ -1,0 +1,29 @@
+scanning 5s ...
+found 1 device(s):
+  - OB6000C(6C6B) 78:1C:9D:E4:6C:6B
+target: OB6000C(6C6B) 78:1C:9D:E4:6C:6B
+connecting ...
+  [state] OB6000C(6C6B) -> DeviceStateEx.Connecting
+  [state] OB6000C(6C6B) -> DeviceStateEx.Connected
+  [state] OB6000C(6C6B) -> DeviceStateEx.Ready
+connect() -> True  state = DeviceStateEx.Ready
+state after wait = DeviceStateEx.Ready
+init ...
+init() -> True  hasInited = True
+deviceInfo: <sensor.sensor_device.DeviceInfo object at 0x00000184F8026A50>
+getParam('NTF') -> NTF_BRTH|ON|NTF_ECG|ON|NTF_EEG|ON|NTF_EMG|ON|NTF_GEST|ON|NTF_GFORCE_ACC|ON|NTF_GFORCE_EULER|ON|NTF_GFORCE_GYRO|ON|NTF_GFORCE_QUAT|ON|NTF_IMPEDANCE|ON|NTF_IMU|ON|NTF_MAG_ANGLE|ON|NTF_PPG|ON|NTF_SPO2|ON
+setParam('NTF_EMG','ON') -> OK
+startDataNotification ...
+startDataNotification() -> True  isDataTransfering = True
+collecting 5s ...
+  [data] dtype=1 sampleRate=50.0 channels=3 samples=3
+  [data] dtype=2 sampleRate=50.0 channels=3 samples=3
+  [data] dtype=5 sampleRate=50.0 channels=4 samples=4
+summary: batches = 951  total_samples = 38227
+last dtype = 4  sampleRate = 50.0  channels = 3
+battery = 94  chip = BLEChipType.RFSTAR
+stopDataNotification ...
+disconnect ...
+  [state] OB6000C(6C6B) -> DeviceStateEx.Disconnecting
+  [state] OB6000C(6C6B) -> DeviceStateEx.Disconnected
+DONE
