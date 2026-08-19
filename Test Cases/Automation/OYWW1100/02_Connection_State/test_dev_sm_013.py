@@ -43,22 +43,29 @@ def _identity_of(name):
     return m.group(1).upper() if m else None
 
 
+TARGET_IDENTITY = "80F3"  # 本用例目标设备：OYWW1100（广播名括号内后四位）
+
+
 def _match_target(devices):
-    for cfg in config.DEVICES:
-        if not cfg.get("enabled", True):
-            continue
-        mac = (cfg.get("mac") or "").strip().upper()
-        identity = (cfg.get("identity") or "").strip().upper()
-        prefix = cfg.get("name_prefix") or ""
-        for d in devices:
-            addr = (getattr(d, 'Address', '') or '').upper()
-            name = getattr(d, 'Name', '') or ''
-            if mac and addr == mac:
-                return d
-            if identity and _identity_of(name) == identity:
-                return d
-            if not mac and not identity and prefix and name.startswith(prefix):
-                return d
+    """只匹配目标设备 OYWW1100，忽略 config 中其他设备（如 OB）及其 enabled 状态。"""
+    cfg = None
+    for c in config.DEVICES:
+        if (c.get("identity") or "").strip().upper() == TARGET_IDENTITY:
+            cfg = c
+            break
+    if cfg is None:
+        return None
+    mac = (cfg.get("mac") or "").strip().upper()
+    prefix = cfg.get("name_prefix") or ""
+    for d in devices:
+        addr = (getattr(d, 'Address', '') or '').upper()
+        name = getattr(d, 'Name', '') or ''
+        if mac and addr == mac:
+            return d
+        if _identity_of(name) == TARGET_IDENTITY:
+            return d
+        if not mac and prefix and name.startswith(prefix):
+            return d
     return None
 
 

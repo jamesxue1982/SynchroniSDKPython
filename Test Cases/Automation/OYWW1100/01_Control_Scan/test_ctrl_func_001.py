@@ -6,10 +6,13 @@
 
 流程（注意：这里的"蓝牙"指【电脑】蓝牙，不是待测设备 OYWW1100）：
   1) 人工关闭电脑蓝牙 -> 按回车
+     （此时待测设备 OYWW1100 保持开机，用于证明"设备在范围内但电脑蓝牙关闭仍扫不到"）
   2) 断言 isEnable == False
   3) 断言 startScan 被拒绝（未进入扫描态 isScanning==False）
   4) 断言 scan 无结果（电脑蓝牙关闭不应扫到设备）
   5) 人工重新开启电脑蓝牙 -> 按回车
+     （此阶段只检查电脑蓝牙 isEnable==True，不扫描、不连接设备，
+       故 OYWW1100 保持开机或关机均可，不影响结果）
   6) 断言 isEnable == True（恢复）
 """
 
@@ -46,7 +49,7 @@ def main():
     results = []
 
     # ---- 阶段 1：关闭蓝牙 ----
-    input("\n>>> [人工操作] 请【关闭电脑】蓝牙（不是待测设备 OYWW1100），并打开OYWW1100设备，完成后按回车继续 ...")
+    input("\n>>> [人工操作] 请【关闭电脑】蓝牙（不是待测设备 OYWW1100），并保持 OYWW1100 设备开机，完成后按回车继续 ...")
 
     is_enable = ctrl.isEnable
     print(f"\n[检查1] SensorController.isEnable = {is_enable}", flush=True)
@@ -76,7 +79,8 @@ def main():
     record(results, "SensorController.scan 无结果（蓝牙关闭）", n == 0, "SensorController.scan 返回 0 台设备", f"SensorController.scan {scan_txt}")
 
     # ---- 阶段 2：重新开启蓝牙 ----
-    input("\n>>> [人工操作] 请【开启电脑】蓝牙（不是待测设备 OYWW1100），完成后按回车继续 ...")
+    input("\n>>> [人工操作] 请【开启电脑】蓝牙（不是待测设备 OYWW1100），完成后按回车继续 ..."
+          "\n    （本阶段只检查电脑蓝牙 isEnable，不扫描、不连接设备；设备 OYWW1100 保持开机或关机均可，不影响结果）")
     time.sleep(2)  # 等待系统刷新蓝牙使能状态
     is_enable = ctrl.isEnable
     print(f"\n[检查4] 恢复后 SensorController.isEnable = {is_enable}", flush=True)

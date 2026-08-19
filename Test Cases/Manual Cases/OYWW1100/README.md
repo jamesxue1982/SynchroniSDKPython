@@ -30,7 +30,7 @@
 
 ## 环境与前置条件
 
-- Python 3.10~3.14，`sensor-sdk==0.8.0`（`pip install --upgrade sensor-sdk`）。
+- Python 3.10~3.14，`sensor-sdk==0.9.1`（`pip install --upgrade sensor-sdk`）。
 - 蓝牙开启（bleak 后端）或 dongle 已绑定（bumble 后端，`checkSetupDongle()` 返回 `OK`）。
 - 设备上电、在扫描范围内、广播名以 `OYWW` 开头。
 - 每个脚本结束调用 `SensorControllerInstance.terminate()`；Ctrl+C 异常路径也需调用。
