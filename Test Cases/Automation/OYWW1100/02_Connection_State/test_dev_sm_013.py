@@ -43,7 +43,7 @@ def _identity_of(name):
     return m.group(1).upper() if m else None
 
 
-TARGET_IDENTITY = "80F3"  # 本用例目标设备：OYWW1100（广播名括号内后四位）
+TARGET_IDENTITY = config.TARGET_IDENTITY  # 目标设备 identity，统一从 config 读
 
 
 def _match_target(devices):

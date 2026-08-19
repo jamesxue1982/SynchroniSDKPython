@@ -1,23 +1,26 @@
 # -*- coding: utf-8 -*-
-"""DATA-FUNC-009：每批样本数 ≈ packageSampleCount。
+"""DATA-FUNC-013：Sample 新增字段与单点访问器一致（0.9.0 新增）。
 
-对应用例：03_数据流.md -> DATA-FUNC-009
+对应用例：03_数据流.md -> DATA-FUNC-013
 可自动化：auto（设备上电、在范围内且已佩戴为运行前置，测试中无需人工动作）
 
 流程：
-  1) scan -> requireSensor -> connect -> 到达 Ready -> init(config.PACKAGE_SAMPLE_COUNT, ...)
+  1) scan -> requireSensor -> connect -> 到达 Ready -> init
   2) setParam("NTF_EMG", "ON") 起 EMG 流
-  3) startDataNotification 后采集窗口内收集所有批次
-  4) 统计每批"每通道样本数"（len(channelSamples[0])），校验：
-     - 多数批 == packageSampleCount（满批占比 >= 80%）
-     - 无超批（每批样本数 <= packageSampleCount）
-     - 允许首尾边界批不足
+  3) startDataNotification 后采集窗口内取第一个非空批次 SensorData
+  4) 对 0.9.0 新增字段逐一校验"Sample 字段 == 单点访问器"：
+       rawData         -> getRawData(ci,si)
+       impedance       -> getImpedance(ci,si)
+       saturation      -> getSaturation(ci,si)
+       timeStampInMs   -> getTimeStampInMs(ci,si)
+       absTimeStampInSec -> getAbsTimeStampInSec(ci,si)
+     channelIndex 无直接单点访问器，通过 getChannelSample(ci,si).channelIndex 校验。
 
 说明：
-  packageSampleCount 是 init 时设定的"每包样本数"（时间维度样本点数）。
-  一批 SensorData 的每通道样本数应约等于该值（多数批精确相等）。
-  允许边界批不足（如停流时刻截断的最后一批）。
-  EMG 采样率 500Hz、packageSampleCount=20，每秒约 25 批，5s 内上百批，统计充分。
+  0.9.0 新增了 Sample.rawData/impedance/saturation/channelIndex/timeStampInMs/
+  absTimeStampInSec 等字段及对应单点访问器。本用例聚焦这些"新增字段"，逐字段
+  给出独立结论，区别于 DATA-FUNC-007（全字段 + sampleIndex 单调）。
+  channelIndex 语义为"样本所属通道"，getChannelSample(ci,si).channelIndex 应 == ci。
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
@@ -50,7 +53,7 @@ TARGET_IDENTITY = config.TARGET_IDENTITY  # 目标设备 identity，统一从 co
 
 
 def _match_target(devices):
-    """只匹配目标设备 OYWW1100，忽略 config 中其他设备（如 OB）及其 enabled 状态。"""
+    """只匹配目标设备，忽略 config 中其他设备及其 enabled 状态。"""
     cfg = None
     for c in config.DEVICES:
         if (c.get("identity") or "").strip().upper() == TARGET_IDENTITY:
@@ -72,61 +75,110 @@ def _match_target(devices):
     return None
 
 
-class BatchSizeCollector:
-    """收集所有批次，记录每批的"每通道样本数"（len(channelSamples[0])）。"""
+class BatchCollector:
+    """保存第一个非空批次，用于新增字段校验。"""
 
     def __init__(self):
-        self.batch_sizes = []  # 每批的每通道样本数
+        self.first_batch = None
+        self.first_batch_samples = 0
+        self.batches = 0
         self.total_samples = 0
 
     def on_data(self, sensor, data):
         items = data if isinstance(data, list) else [data]
         for d in items:
+            self.batches += 1
             cs = getattr(d, 'channelSamples', None)
-            n_s = 0
+            n = 0
             if cs:
                 try:
-                    n_ch = len(cs)
-                    n_s = len(cs[0]) if n_ch else 0
+                    n = sum(len(ch) for ch in cs)
                 except TypeError:
-                    n_s = len(cs)
-            self.batch_sizes.append(n_s)
-            self.total_samples += n_s
+                    n = len(cs)
+            self.total_samples += n
+            if self.first_batch is None and n > 0:
+                self.first_batch = d
+                self.first_batch_samples = n
 
 
-def check_batch_sizes(batch_sizes, package_sample_count, results):
-    """校验每批样本数是否 ≈ packageSampleCount。"""
+# 0.9.0 新增字段 -> 对应单点访问器（channelIndex 单独处理，无直接访问器）
+NEW_FIELD_ACCESSORS = [
+    ("rawData", "getRawData"),
+    ("impedance", "getImpedance"),
+    ("saturation", "getSaturation"),
+    ("timeStampInMs", "getTimeStampInMs"),
+    ("absTimeStampInSec", "getAbsTimeStampInSec"),
+]
+
+
+def check_new_fields(data, results):
+    """对一批 SensorData 逐一校验新增字段与访问器一致性。"""
 
     def add(name, ok, expect, actual):
         record(results, name, ok, expect, actual)
 
-    total = len(batch_sizes)
-    full = sum(1 for n in batch_sizes if n == package_sample_count)
-    over = sum(1 for n in batch_sizes if n > package_sample_count)
-    under = sum(1 for n in batch_sizes if 0 < n < package_sample_count)
-    empty = sum(1 for n in batch_sizes if n == 0)
-    ratio = full / total if total else 0
+    cs = getattr(data, 'channelSamples', None)
+    if not cs:
+        add("channelSamples 结构合法", False, "通道数>0 且每通道样本数>0", "channelSamples 为空/无数据")
+        return
+    try:
+        n_ch = len(cs)
+        n_s = len(cs[0]) if n_ch else 0
+    except TypeError:
+        n_ch = n_s = 0
+    if n_ch == 0 or n_s == 0:
+        add("channelSamples 结构合法", False, "通道数>0 且每通道样本数>0",
+            f"通道数={n_ch} 每通道样本数={n_s}")
+        return
+    add("channelSamples 结构合法", True, "通道数>0 且每通道样本数>0",
+        f"通道数={n_ch} 每通道样本数={n_s}")
 
-    # 判定 1：收到足够批次
-    add("采集窗口内收到足够批次（>= 5 批）", total >= 5,
-        "收到 >= 5 批 SensorData", f"批数={total}")
+    # 遍历，返回首个不一致描述；None 表示全一致
+    def scan(check_fn):
+        for ci in range(n_ch):
+            for si in range(n_s):
+                try:
+                    s = cs[ci][si]
+                    bad = check_fn(ci, si, s)
+                except Exception as e:
+                    bad = f"抛异常 {type(e).__name__}: {e}"
+                if bad is not None:
+                    return f"ci={ci} si={si} {bad}"
+        return None
 
-    # 判定 2：多数批满批
-    add("多数批样本数 == packageSampleCount（满批占比 >= 80%）", total > 0 and ratio >= 0.8,
-        f"满批（=={package_sample_count}）占比 >= 80%",
-        f"总批数={total} 满批={full} 不足批={under} 空批={empty} 超批={over} 满批占比={ratio:.0%}")
+    # 1) 各新增字段 -> 单点访问器
+    for field, accessor in NEW_FIELD_ACCESSORS:
+        def make(field, accessor):
+            def inner(ci, si, s):
+                v1 = getattr(s, field, None)
+                v2 = getattr(data, accessor)(ci, si)
+                if v2 != v1:
+                    return f"{accessor}(ci,si)={v2!r} != sample.{field}={v1!r}"
+                return None
+            return inner
 
-    # 判定 3：无超批
-    add("无超批（每批样本数 <= packageSampleCount）", over == 0,
-        f"每批样本数 <= {package_sample_count}",
-        f"超批={over}" if over else "无超批")
+        bad = scan(make(field, accessor))
+        add(f"{accessor}(ci,si) 与 sample.{field} 一致", bad is None,
+            f"{accessor}(ci,si) == sample.{field}", bad if bad else "全部一致")
+
+    # 2) channelIndex（无直接访问器，经 getChannelSample）
+    def chk_channel_index(ci, si, s):
+        s2 = data.getChannelSample(ci, si)
+        v = getattr(s2, 'channelIndex', None)
+        if v != ci:
+            return f"getChannelSample(ci,si).channelIndex={v!r} != ci={ci}"
+        return None
+
+    bad = scan(chk_channel_index)
+    add("getChannelSample(ci,si).channelIndex == ci", bad is None,
+        "getChannelSample(ci,si).channelIndex 等于通道索引 ci", bad if bad else "全部一致")
 
 
 def main():
     ctrl = SensorControllerInstance
 
     print("=" * 60, flush=True)
-    print("DATA-FUNC-009 每批样本数 ≈ packageSampleCount", flush=True)
+    print("DATA-FUNC-013 Sample 新增字段与单点访问器一致", flush=True)
     print("=" * 60, flush=True)
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
@@ -134,7 +186,6 @@ def main():
     print("\n[前置条件]", flush=True)
     print("  - 主机(电脑)：蓝牙已开启", flush=True)
     print("  - 待测设备：OYWW1100 上电、在范围内，且已佩戴（电极接触皮肤）", flush=True)
-    print(f"  - init packageSampleCount = {config.PACKAGE_SAMPLE_COUNT}", flush=True)
 
     input("\n>>> [人工操作] 请确认待测设备 OYWW1100 已【开机】、在范围内且已【佩戴】，"
           "测试过程无需额外动作，完成后按回车继续 ...")
@@ -159,8 +210,8 @@ def main():
     target = _match_target(devices)
 
     if target is None:
-        print("[FAIL] 未匹配到目标设备（OYWW1100/80F3）", flush=True)
-        record(results, "scan 匹配到目标设备", False, "scan 返回含 OYWW1100", "未匹配到目标")
+        print("[FAIL] 未匹配到目标设备", flush=True)
+        record(results, "scan 匹配到目标设备", False, "scan 返回含目标设备", "未匹配到目标")
         print("\n结论: FAIL", flush=True)
         ctrl.terminate()
         return
@@ -168,7 +219,7 @@ def main():
     name = getattr(target, 'Name', '?')
     addr = getattr(target, 'Address', '?')
     print(f"[扫描] 目标设备: {name} {addr}", flush=True)
-    record(results, "scan 匹配到目标设备", True, "scan 返回含 OYWW1100", f"匹配到 {name} {addr}")
+    record(results, "scan 匹配到目标设备", True, "scan 返回含目标设备", f"匹配到 {name} {addr}")
 
     # requireSensor
     sensor = ctrl.requireSensor(target)
@@ -231,7 +282,7 @@ def main():
         p_txt = f"抛异常 {type(e).__name__}: {e}"
     print(f"[起流] setParam('NTF_EMG', 'ON') -> {p_txt}", flush=True)
 
-    collector = BatchSizeCollector()
+    collector = BatchCollector()
     sensor.onDataCallback = collector.on_data
 
     print("[起流] SensorProfile.startDataNotification() ...", flush=True)
@@ -245,20 +296,12 @@ def main():
     record(results, "SensorProfile.startDataNotification 返回 True", sret is True,
            "startDataNotification() 返回 True", f"startDataNotification() -> {start_txt}")
 
-    # 采集窗口，收集所有批次
+    # 采集窗口
     print(f"\n[采集] 等待 {config.COLLECT_SECONDS}s 观察 onDataCallback ...", flush=True)
     time.sleep(config.COLLECT_SECONDS)
-    print(f"[采集] 收到批数={len(collector.batch_sizes)} 每通道样本总数={collector.total_samples}", flush=True)
+    print(f"[采集] 收到批次={collector.batches} 非空批次样本数={collector.first_batch_samples}", flush=True)
 
-    # 打印每批样本数分布（供定位）
-    if collector.batch_sizes:
-        from collections import Counter
-        dist = Counter(collector.batch_sizes)
-        print(f"[采集] 每批样本数分布（样本数->批数）: {dict(sorted(dist.items()))}", flush=True)
-
-    check_batch_sizes(collector.batch_sizes, config.PACKAGE_SAMPLE_COUNT, results)
-
-    # 清理
+    # 停流
     try:
         sensor.stopDataNotification()
     except Exception:
@@ -267,6 +310,19 @@ def main():
         sensor.setParam("NTF_EMG", "OFF")
     except Exception:
         pass
+
+    # 校验新增字段
+    if collector.first_batch is None:
+        print("[FAIL] 采集窗口内未收到非空数据，无法校验新增字段", flush=True)
+        record(results, "采集窗口内收到非空数据", False,
+               "收到至少一批非空 SensorData", f"批次数={collector.batches} 非空批次=0")
+    else:
+        record(results, "采集窗口内收到非空数据", True,
+               "收到至少一批非空 SensorData",
+               f"批次数={collector.batches} 非空样本数={collector.first_batch_samples}")
+        check_new_fields(collector.first_batch, results)
+
+    # 清理
     try:
         sensor.disconnect()
     except Exception as e:

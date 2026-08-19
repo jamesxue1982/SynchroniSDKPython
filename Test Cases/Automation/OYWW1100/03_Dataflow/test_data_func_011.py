@@ -1,24 +1,23 @@
 # -*- coding: utf-8 -*-
-"""DATA-FUNC-010：NTF_IMU 聚合批通道布局（仅新 EMG 设备）。
+"""DATA-FUNC-011：传统 EMG 设备 NTF_GEST 与 NTF_EMG 互斥。
 
-对应用例：03_数据流.md -> DATA-FUNC-010
+对应用例：03_数据流.md -> DATA-FUNC-011
 可自动化：auto（能力判定后执行/跳过；设备上电、在范围内为运行前置）
 
 流程：
   1) scan -> requireSensor -> connect -> 到达 Ready -> init
   2) getDeviceInfo() 读 ImuChannelCount
-  3) ImuChannelCount==0：记录"不支持，跳过"（SKIP，传统设备无聚合流）
-  4) ImuChannelCount>0：setParam("NTF_IMU","ON") 起聚合流，取第一个非空批次校验：
-     - getDataType()==NTF_IMU
-     - getChannelCount()==ImuChannelCount 且 len(channelSamples)==ImuChannelCount
-     - 固定布局 acc 0-2 / gyro 3-5 / euler 6-8 / quat 9-12 各分段存在且有数据
+  3) ImuChannelCount>0：新 EMG 设备，NTF_GEST/NTF_EMG 不互斥 → 记录"不适用，跳过"（SKIP）
+  4) ImuChannelCount==0：传统 EMG 设备，验证互斥：
+     - 清理：NTF_GEST OFF + NTF_EMG OFF
+     - 同时 setParam("NTF_GEST","ON") + setParam("NTF_EMG","ON")
+     - startDataNotification 起流，采集窗口统计实际收到的 DataType
+     - 断言：两者只生效其一（EMG/GEST 不同时收到数据，且至少收到其一）
 
 说明：
-  NTF_IMU 聚合流是"新 EMG 设备"才有的能力，把 acc/gyro/euler/quat 四路合成一个
-  13 通道批（部分非 QAT6 设备仅 acc+gyro 6 通道）。布局固定：
-    通道 0-2=acc、3-5=gyro、6-8=euler、9-12=quat。
-  ImuChannelCount 由 DeviceInfo 上报，0 表示无聚合流（传统设备改用四路独立流）。
-  OYWW1100 实测 ImuChannelCount=13。
+  README：on legacy (non-new) EMG devices, NTF_GEST and NTF_EMG are mutually exclusive.
+  新 EMG 设备（有 NTF_IMU 聚合流，ImuChannelCount>0）GEST 独立，不适用本用例。
+  "互斥"以"实际收到的数据流"为准（setParam 返回 OK 不代表最终生效）。
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
@@ -53,7 +52,7 @@ TARGET_IDENTITY = config.TARGET_IDENTITY  # 目标设备 identity，统一从 co
 
 
 def _match_target(devices):
-    """只匹配目标设备 OYWW1100，忽略 config 中其他设备及其 enabled 状态。"""
+    """只匹配目标设备，忽略 config 中其他设备及其 enabled 状态。"""
     cfg = None
     for c in config.DEVICES:
         if (c.get("identity") or "").strip().upper() == TARGET_IDENTITY:
@@ -84,29 +83,18 @@ def _dt_name(dt):
         return str(dt)
 
 
-# NTF_IMU 聚合批固定布局：acc 0-2 / gyro 3-5 / euler 6-8 / quat 9-12
-IMU_LAYOUT = [
-    ("ACC",   0, 3),
-    ("GYRO",  3, 6),
-    ("EULER", 6, 9),
-    ("QUAT",  9, 13),
-]
-
-
-class ImuCollector:
-    """收集 NTF_IMU 数据，保存第一个非空批次用于布局校验。"""
+class StreamCollector:
+    """按 DataType 统计收到的批次与样本数，用于判断 GEST/EMG 哪个生效。"""
 
     def __init__(self):
-        self.first_batch = None
-        self.batches = 0
-        self.total_samples = 0
+        self.by_type = {}
 
     def on_data(self, sensor, data):
         items = data if isinstance(data, list) else [data]
         for d in items:
-            if _dt_name(d.getDataType()) != "NTF_IMU":
-                continue
-            self.batches += 1
+            dt = d.getDataType()
+            entry = self.by_type.setdefault(dt, {'batches': 0, 'samples': 0})
+            entry['batches'] += 1
             cs = getattr(d, 'channelSamples', None)
             n = 0
             if cs:
@@ -114,59 +102,14 @@ class ImuCollector:
                     n = sum(len(ch) for ch in cs)
                 except TypeError:
                     n = len(cs)
-            self.total_samples += n
-            if self.first_batch is None and n > 0:
-                self.first_batch = d
-
-
-def check_imu_layout(data, imu_channels, results):
-    """对一批 NTF_IMU 数据校验通道布局。"""
-
-    def add(name, ok, expect, actual):
-        record(results, name, ok, expect, actual)
-
-    # 1. 数据类型
-    dt = data.getDataType()
-    dt_txt = _dt_name(dt)
-    add("收到 NTF_IMU 聚合数据", dt_txt == "NTF_IMU",
-        "getDataType()==NTF_IMU", f"getDataType()={dt_txt}")
-
-    # 2. 元数据通道数 == ImuChannelCount
-    meta_ch = data.getChannelCount()
-    add("getChannelCount()==ImuChannelCount", meta_ch == imu_channels,
-        f"getChannelCount()=={imu_channels}", f"getChannelCount()={meta_ch}")
-
-    # 3. 结构通道数 == ImuChannelCount
-    cs = getattr(data, 'channelSamples', None)
-    n_ch = len(cs) if cs else 0
-    add("channelSamples 通道数==ImuChannelCount", n_ch == imu_channels,
-        f"channelSamples 通道数=={imu_channels}", f"channelSamples 通道数={n_ch}")
-
-    # 4. 各布局分段存在且有数据（按 ImuChannelCount 覆盖到的分段）
-    for seg_name, start, end in IMU_LAYOUT:
-        if imu_channels >= end:
-            seg_has = n_ch >= end
-            seg_samples = 0
-            if seg_has and cs:
-                try:
-                    seg_samples = sum(len(cs[i]) for i in range(start, end))
-                except Exception:
-                    seg_samples = 0
-            add(f"{seg_name} 分段存在（通道 {start}-{end - 1}）且有数据",
-                seg_has and seg_samples > 0,
-                f"通道 {start}-{end - 1} 存在且样本数>0",
-                f"存在={seg_has} 分段样本数={seg_samples}")
-        else:
-            add(f"{seg_name} 分段（通道 {start}-{end - 1}）", None,
-                f"ImuChannelCount>={end} 时该分段应存在",
-                f"ImuChannelCount={imu_channels}，无该分段")
+            entry['samples'] += n
 
 
 def main():
     ctrl = SensorControllerInstance
 
     print("=" * 60, flush=True)
-    print("DATA-FUNC-010 NTF_IMU 聚合批通道布局", flush=True)
+    print("DATA-FUNC-011 传统 EMG 设备 NTF_GEST 与 NTF_EMG 互斥", flush=True)
     print("=" * 60, flush=True)
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
@@ -198,8 +141,8 @@ def main():
     target = _match_target(devices)
 
     if target is None:
-        print("[FAIL] 未匹配到目标设备（OYWW1100/80F3）", flush=True)
-        record(results, "scan 匹配到目标设备", False, "scan 返回含 OYWW1100", "未匹配到目标")
+        print("[FAIL] 未匹配到目标设备", flush=True)
+        record(results, "scan 匹配到目标设备", False, "scan 返回含目标设备", "未匹配到目标")
         print("\n结论: FAIL", flush=True)
         ctrl.terminate()
         return
@@ -207,7 +150,7 @@ def main():
     name = getattr(target, 'Name', '?')
     addr = getattr(target, 'Address', '?')
     print(f"[扫描] 目标设备: {name} {addr}", flush=True)
-    record(results, "scan 匹配到目标设备", True, "scan 返回含 OYWW1100", f"匹配到 {name} {addr}")
+    record(results, "scan 匹配到目标设备", True, "scan 返回含目标设备", f"匹配到 {name} {addr}")
 
     # requireSensor
     sensor = ctrl.requireSensor(target)
@@ -260,7 +203,7 @@ def main():
     print(f"[init] SensorProfile.init() -> {init_txt}", flush=True)
     record(results, "SensorProfile.init 返回 True", iret is True, "init() 返回 True", f"init() -> {init_txt}")
 
-    # getDeviceInfo -> ImuChannelCount
+    # getDeviceInfo -> ImuChannelCount（区分新/传统 EMG 设备）
     info = sensor.getDeviceInfo()
     record(results, "getDeviceInfo() 返回 DeviceInfo", info is not None,
            "getDeviceInfo() 返回 DeviceInfo（非 None）",
@@ -283,12 +226,12 @@ def main():
         print(f"[info] 读取 ImuChannelCount 抛异常 {type(e).__name__}: {e}，按 0 处理", flush=True)
     print(f"\n[能力] DeviceInfo.ImuChannelCount = {imu_channels}", flush=True)
 
-    # 能力判定：0 = 传统设备，无聚合流，跳过
-    if imu_channels <= 0:
-        record(results, "NTF_IMU 聚合流能力判定", None,
-               "ImuChannelCount>0 时校验聚合布局",
-               "ImuChannelCount==0，设备不支持 NTF_IMU 聚合流（传统设备）")
-        print("[SKIP] ImuChannelCount==0，设备无 NTF_IMU 聚合流，跳过布局校验", flush=True)
+    # 能力判定：ImuChannelCount>0 = 新 EMG 设备（GEST 独立，无互斥），本用例仅针对传统设备
+    if imu_channels > 0:
+        record(results, "传统 EMG 设备 GEST/EMG 互斥判定", None,
+               "ImuChannelCount==0（传统设备）时验证互斥",
+               f"ImuChannelCount={imu_channels}，新 EMG 设备，GEST 独立不互斥")
+        print("[SKIP] 新 EMG 设备（ImuChannelCount>0），NTF_GEST/NTF_EMG 不互斥，本用例不适用，跳过", flush=True)
         try:
             sensor.disconnect()
         except Exception:
@@ -297,23 +240,40 @@ def main():
         ctrl.terminate()
         return
 
-    # 起 NTF_IMU 流
-    print("\n[起流] 先关闭 NTF_IMU 清理状态 ...", flush=True)
-    try:
-        sensor.setParam("NTF_IMU", "OFF")
-    except Exception as e:
-        print(f"  [清理] NTF_IMU OFF 抛异常 {type(e).__name__}: {e}", flush=True)
+    # ---- 传统 EMG 设备：验证 GEST/EMG 互斥 ----
+    print("\n[互斥测试] 传统 EMG 设备，验证 NTF_GEST 与 NTF_EMG 互斥", flush=True)
 
-    print("[起流] SensorProfile.setParam('NTF_IMU', 'ON') ...", flush=True)
+    # 清理初始状态
+    print("[清理] NTF_GEST OFF + NTF_EMG OFF ...", flush=True)
     try:
-        p_ret = sensor.setParam("NTF_IMU", "ON")
-        p_txt = f"返回 {p_ret!r}"
+        sensor.setParam("NTF_GEST", "OFF")
     except Exception as e:
-        p_ret = None
-        p_txt = f"抛异常 {type(e).__name__}: {e}"
-    print(f"[起流] setParam('NTF_IMU', 'ON') -> {p_txt}", flush=True)
+        print(f"  [清理] NTF_GEST OFF 抛异常 {type(e).__name__}: {e}", flush=True)
+    try:
+        sensor.setParam("NTF_EMG", "OFF")
+    except Exception as e:
+        print(f"  [清理] NTF_EMG OFF 抛异常 {type(e).__name__}: {e}", flush=True)
 
-    collector = ImuCollector()
+    # 同时 ON
+    print("[setParam] NTF_GEST='ON' 与 NTF_EMG='ON' 同时设置 ...", flush=True)
+    try:
+        g_ret = sensor.setParam("NTF_GEST", "ON")
+    except Exception as e:
+        g_ret = f"抛异常 {type(e).__name__}: {e}"
+    try:
+        e_ret = sensor.setParam("NTF_EMG", "ON")
+    except Exception as e:
+        e_ret = f"抛异常 {type(e).__name__}: {e}"
+    print(f"[setParam] NTF_GEST ON -> {g_ret!r} ; NTF_EMG ON -> {e_ret!r}", flush=True)
+
+    # 读回 NTF 状态（辅助信息，最终以实际数据流为准）
+    try:
+        ntf_state = sensor.getParam("NTF")
+    except Exception as e:
+        ntf_state = f"抛异常 {type(e).__name__}: {e}"
+    print(f"[getParam] getParam('NTF') -> {ntf_state!r}", flush=True)
+
+    collector = StreamCollector()
     sensor.onDataCallback = collector.on_data
 
     print("[起流] SensorProfile.startDataNotification() ...", flush=True)
@@ -328,28 +288,42 @@ def main():
            "startDataNotification() 返回 True", f"startDataNotification() -> {start_txt}")
 
     # 采集窗口
-    print(f"\n[采集] 等待 {config.COLLECT_SECONDS}s 观察 NTF_IMU 回调 ...", flush=True)
+    print(f"\n[采集] 等待 {config.COLLECT_SECONDS}s 观察 GEST/EMG 实际生效流 ...", flush=True)
     time.sleep(config.COLLECT_SECONDS)
-    print(f"[采集] 收到 NTF_IMU 批次={collector.batches} 总样本数(展开)={collector.total_samples}", flush=True)
 
-    # 停流
+    emg_entry = collector.by_type.get(DataType.NTF_EMG, {'batches': 0, 'samples': 0})
+    gest_entry = collector.by_type.get(DataType.NTF_GEST, {'batches': 0, 'samples': 0})
+    got_types = {_dt_name(k): v['batches'] for k, v in collector.by_type.items()}
+    print(f"[采集] 实际收到类型={got_types}", flush=True)
+    print(f"[采集] EMG 批次={emg_entry['batches']} 样本={emg_entry['samples']} ; "
+          f"GEST 批次={gest_entry['batches']} 样本={gest_entry['samples']}", flush=True)
+
+    emg_on = emg_entry['samples'] > 0
+    gest_on = gest_entry['samples'] > 0
+
+    # 判定 1：至少一种流生效
+    record(results, "GEST/EMG 至少一种流收到数据", emg_on or gest_on,
+           "NTF_EMG 或 NTF_GEST 至少收到数据",
+           f"EMG样本={emg_entry['samples']} GEST样本={gest_entry['samples']}")
+
+    # 判定 2：互斥（不同时收到）
+    record(results, "NTF_GEST 与 NTF_EMG 互斥（不同时收到数据）", not (emg_on and gest_on),
+           "两者只生效其一（不同时收到 EMG 与 GEST 数据）",
+           f"EMG={'收' if emg_on else '不收'} GEST={'收' if gest_on else '不收'}")
+
+    # 停流 + 清理
     try:
         sensor.stopDataNotification()
     except Exception:
         pass
     try:
-        sensor.setParam("NTF_IMU", "OFF")
+        sensor.setParam("NTF_GEST", "OFF")
     except Exception:
         pass
-
-    # 布局校验
-    if collector.first_batch is None:
-        print("[FAIL] 采集窗口内未收到非空 NTF_IMU 数据，无法校验布局", flush=True)
-        record(results, "收到 NTF_IMU 聚合数据", False,
-               "采集窗口内收到非空 NTF_IMU 批次",
-               f"NTF_IMU 批次={collector.batches} 非空批次=0")
-    else:
-        check_imu_layout(collector.first_batch, imu_channels, results)
+    try:
+        sensor.setParam("NTF_EMG", "OFF")
+    except Exception:
+        pass
 
     # 清理
     try:

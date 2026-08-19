@@ -46,7 +46,7 @@ def _identity_of(name):
     return m.group(1).upper() if m else None
 
 
-TARGET_IDENTITY = "80F3"  # 本用例目标设备：OYWW1100（广播名括号内后四位）
+TARGET_IDENTITY = config.TARGET_IDENTITY  # 目标设备 identity，统一从 config 读
 LOST_OBSERVE_SECONDS = 15  # 采集观察时长（秒），留足人工制造干扰的时间
 
 
