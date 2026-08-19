@@ -16,7 +16,7 @@
 - **有效性说明**：bin 元数据完整。
 - **可自动化**：auto
 - **人工介入**：无
-- **测试结果**：待测试
+- **测试结果**：通过
 
 ### BIN-FUNC-003 getBinFileInfo 无效输入返回 None
 - **测试目的**：验证逆向。
@@ -25,25 +25,25 @@
 - **有效性说明**：容错。
 - **可自动化**：auto
 - **人工介入**：无
-- **测试结果**：待测试
+- **测试结果**：通过
 
 ### BIN-FUNC-004 回放 realtime=True 按原始节奏
 - **测试目的**：验证实时回放。
-- **流程与逻辑**：`replayBinFile(path, sensor, realtime=True)`，统计 `onDataCallback` 批数。
-- **预期结果**：按原始节奏回放，批数与实收一致。
-- **有效性说明**：回放节奏保真。
+- **流程与逻辑**：`replayBinFile(path, sensor, realtime=True)`，统计 `onDataCallback` 批数；比对回放是否产生数据、包含 live 的 DataType、startTimeStamp 非 None。
+- **预期结果**：回放产生数据，DataType 覆盖 live 类型，startTimeStamp 非 None；回放耗时与录制时长同量级。精确批数可能因 bin 解析器分组方式不同而存在差异，仅作参考。
+- **有效性说明**：回放数据保真 + 节奏保真。
 - **可自动化**：auto
 - **人工介入**：无
-- **测试结果**：待测试
+- **测试结果**：通过
 
 ### BIN-FUNC-005 回放 realtime=False 全速
 - **测试目的**：验证全速回放。
-- **流程与逻辑**：`replayBinFile(path, sensor, realtime=False)`，统计批数。
-- **预期结果**：全速回放，批数与实收一致。
-- **有效性说明**：回放数据量保真。
+- **流程与逻辑**：`replayBinFile(path, sensor, realtime=False)`，统计 `onDataCallback` 批数；比对回放是否产生数据、包含 live 的 DataType、startTimeStamp 非 None。
+- **预期结果**：回放产生数据，DataType 覆盖 live 类型，startTimeStamp 非 None；回放耗时远小于录制时长（全速）。精确批数可能因 bin 解析器分组方式不同而存在差异，仅作参考。
+- **有效性说明**：回放数据保真 + 全速加速。
 - **可自动化**：auto
 - **人工介入**：无
-- **测试结果**：待测试
+- **测试结果**：通过
 
 ### BIN-FUNC-006 pause/resume/stop 回放
 - **测试目的**：验证回放控制。

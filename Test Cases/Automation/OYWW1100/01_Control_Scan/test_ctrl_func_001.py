@@ -26,10 +26,8 @@ sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
 import config
-
-
-def record(results, name, ok, expect, actual):
-    results.append((name, "PASS" if ok else "FAIL", expect, actual))
+import common
+from common import record
 
 
 def main():
@@ -41,10 +39,7 @@ def main():
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
 
-    enabled = [c for c in config.DEVICES if c.get("enabled", True)]
-    print(f"\n[本轮启用设备 {len(enabled)} 台]", flush=True)
-    for c in enabled:
-        print(f"  - name_prefix={c.get('name_prefix')} identity={c.get('identity')} mac={c.get('mac') or '(空)'}", flush=True)
+    print(f"\n[本轮目标设备] {common.TARGET_IDENTITIES}", flush=True)
 
     results = []
 

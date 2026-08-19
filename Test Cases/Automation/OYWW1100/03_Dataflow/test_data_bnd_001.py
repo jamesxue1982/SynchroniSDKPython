@@ -108,11 +108,7 @@ except Exception:
     pass
 '''
 
-
-def record(results, name, ok, expect, actual):
-    # ok: True=PASS, False=FAIL, None=INVALID（前置不满足，需重跑，不计入 PASS/FAIL）
-    status = "PASS" if ok is True else ("FAIL" if ok is False else "INVALID")
-    results.append((name, status, expect, actual))
+from common import record
 
 
 def _probe(value):

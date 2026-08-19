@@ -25,12 +25,9 @@ sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
 import config
+from common import record
 
-BAD_MAC = "00:00:00:00:00:00"  # 用于“未命中”的错误 mac
-
-
-def record(results, name, ok, expect, actual):
-    results.append((name, "PASS" if ok else "FAIL", expect, actual))
+BAD_MAC = "00:00:00:00:00:00"  # 用于"未命中"的错误 mac
 
 
 def _find_oyww(devices):

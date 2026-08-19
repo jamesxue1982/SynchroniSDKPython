@@ -35,41 +35,8 @@ sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
 import config
-
-
-def record(results, name, ok, expect, actual):
-    results.append((name, "PASS" if ok else "FAIL", expect, actual))
-
-
-def _identity_of(name):
-    m = re.search(r"\(([0-9A-Fa-f]{4})\)", name or "")
-    return m.group(1).upper() if m else None
-
-
-TARGET_IDENTITY = config.TARGET_IDENTITY  # 目标设备 identity，统一从 config 读
-
-
-def _match_target(devices):
-    """只匹配目标设备 OYWW1100，忽略 config 中其他设备（如 OB）及其 enabled 状态。"""
-    cfg = None
-    for c in config.DEVICES:
-        if (c.get("identity") or "").strip().upper() == TARGET_IDENTITY:
-            cfg = c
-            break
-    if cfg is None:
-        return None
-    mac = (cfg.get("mac") or "").strip().upper()
-    prefix = cfg.get("name_prefix") or ""
-    for d in devices:
-        addr = (getattr(d, 'Address', '') or '').upper()
-        name = getattr(d, 'Name', '') or ''
-        if mac and addr == mac:
-            return d
-        if _identity_of(name) == TARGET_IDENTITY:
-            return d
-        if not mac and prefix and name.startswith(prefix):
-            return d
-    return None
+import common
+from common import record, _identity_of, match_target
 
 
 class BatchSizeCollector:
@@ -156,7 +123,7 @@ def main():
     except Exception as e:
         devices = None
         print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    target = _match_target(devices)
+    target = match_target(devices)
 
     if target is None:
         print("[FAIL] 未匹配到目标设备（OYWW1100/80F3）", flush=True)

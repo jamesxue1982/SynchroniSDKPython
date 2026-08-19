@@ -29,15 +29,12 @@ AUTOMATION_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
 sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
+from common import record
 
 BACKEND_PROBE = (
     "from sensor import SensorControllerInstance as c; "
     "print('BACKEND=' + str(c.getBLEBackendName()))"
 )
-
-
-def record(results, name, ok, expect, actual):
-    results.append((name, "PASS" if ok else "FAIL", expect, actual))
 
 
 def _probe_backend(backend_env):

@@ -25,10 +25,7 @@ sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
 import config
-
-
-def record(results, name, ok, expect, actual):
-    results.append((name, "PASS" if ok else "FAIL", expect, actual))
+from common import record
 
 
 def _find_oyww(devices):

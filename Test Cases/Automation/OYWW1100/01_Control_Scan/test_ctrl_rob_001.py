@@ -18,6 +18,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUTOMATION_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
 sys.path.insert(0, AUTOMATION_DIR)
 
+from common import record
+
 LOOP_COUNT = 20      # 交替次数
 PERIOD_MS = 300      # startScan 短周期
 TIMEOUT = 60         # 死锁判定超时（秒）
@@ -43,10 +45,6 @@ PROBE = (
     "print('ISSCANNING=' + repr(c.isScanning), flush=True)\n"
     "print('ELAPSED=' + str(elapsed), flush=True)\n"
 ) % (LOOP_COUNT, PERIOD_MS)
-
-
-def record(results, name, ok, expect, actual):
-    results.append((name, "PASS" if ok else "FAIL", expect, actual))
 
 
 def _parse_key(out, key):

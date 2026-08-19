@@ -27,6 +27,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUTOMATION_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
 sys.path.insert(0, AUTOMATION_DIR)
 
+from common import record
+
 MAX_INT32 = 2147483647  # period_in_ms 假设上限（int32 max）
 BOUNDARY_VALUES = [0, 1, MAX_INT32 - 1, MAX_INT32, -1, MAX_INT32 + 1]
 LEGAL = {0, 1, MAX_INT32 - 1, MAX_INT32}
@@ -41,10 +43,6 @@ PROBE = (
     "except Exception as e:\n"
     "    print('RAISED=' + type(e).__name__ + ':' + str(e), flush=True)\n"
 )
-
-
-def record(results, name, ok, expect, actual):
-    results.append((name, "PASS" if ok else "FAIL", expect, actual))
 
 
 def _probe(value):

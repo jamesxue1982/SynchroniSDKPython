@@ -43,9 +43,7 @@ for _cfg in config.DEVICES:
         TARGET_PREFIX = _cfg.get("name_prefix") or ""
         break
 
-
-def record(results, name, ok, expect, actual):
-    results.append((name, "PASS" if ok else "FAIL", expect, actual))
+from common import record
 
 
 def _key(out, key):

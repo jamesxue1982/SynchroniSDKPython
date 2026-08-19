@@ -19,7 +19,6 @@
 """
 
 import os
-import re
 import sys
 import time
 
@@ -29,36 +28,7 @@ sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
 import config
-
-
-def record(results, name, ok, expect, actual):
-    results.append((name, "PASS" if ok else "FAIL", expect, actual))
-
-
-def _identity_of(name):
-    """从广播名（如 "OB6000C(6C6B)"）提取括号内后四位。"""
-    m = re.search(r"\(([0-9A-Fa-f]{4})\)", name or "")
-    return m.group(1).upper() if m else None
-
-
-def _match_target(devices):
-    """按 config 启用的设备，从扫描结果匹配第一台目标（优先级 mac > identity > name_prefix）。"""
-    for cfg in config.DEVICES:
-        if not cfg.get("enabled", True):
-            continue
-        mac = (cfg.get("mac") or "").strip().upper()
-        identity = (cfg.get("identity") or "").strip().upper()
-        prefix = cfg.get("name_prefix") or ""
-        for d in devices:
-            addr = (getattr(d, 'Address', '') or '').upper()
-            name = getattr(d, 'Name', '') or ''
-            if mac and addr == mac:
-                return d
-            if identity and _identity_of(name) == identity:
-                return d
-            if not mac and not identity and prefix and name.startswith(prefix):
-                return d
-    return None
+from common import record, _identity_of, match_target
 
 
 def main():
@@ -135,7 +105,7 @@ def main():
     for d in devices:
         print(f"  - {getattr(d, 'Name', '?')} {getattr(d, 'Address', '?')}", flush=True)
 
-    target = _match_target(devices)
+    target = match_target(devices)
     if target is None:
         print("[检查4] 未匹配到 config 中启用的设备（OYWW1100/80F3）", flush=True)
         record(results, "SensorController.scan 发现目标设备 OYWW1100", False,

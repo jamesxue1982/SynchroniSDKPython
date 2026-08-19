@@ -27,7 +27,6 @@
 """
 
 import os
-import re
 import sys
 import time
 
@@ -37,34 +36,7 @@ sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
 import config
-
-
-def record(results, name, ok, expect, actual):
-    results.append((name, "PASS" if ok else "FAIL", expect, actual))
-
-
-def _identity_of(name):
-    m = re.search(r"\(([0-9A-Fa-f]{4})\)", name or "")
-    return m.group(1).upper() if m else None
-
-
-def _match_target(devices):
-    for cfg in config.DEVICES:
-        if not cfg.get("enabled", True):
-            continue
-        mac = (cfg.get("mac") or "").strip().upper()
-        identity = (cfg.get("identity") or "").strip().upper()
-        prefix = cfg.get("name_prefix") or ""
-        for d in devices:
-            addr = (getattr(d, 'Address', '') or '').upper()
-            name = getattr(d, 'Name', '') or ''
-            if mac and addr == mac:
-                return d
-            if identity and _identity_of(name) == identity:
-                return d
-            if not mac and not identity and prefix and name.startswith(prefix):
-                return d
-    return None
+from common import record, _identity_of, match_target
 
 
 def _dt_name(dt):
@@ -243,7 +215,7 @@ def main():
     except Exception as e:
         devices = None
         print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    target = _match_target(devices)
+    target = match_target(devices)
 
     if target is None:
         print("[FAIL] 未匹配到 config 中启用的设备", flush=True)

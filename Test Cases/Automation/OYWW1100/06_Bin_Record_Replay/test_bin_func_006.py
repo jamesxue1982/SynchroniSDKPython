@@ -1,25 +1,21 @@
 # -*- coding: utf-8 -*-
-"""BIN-FUNC-002：getBinFileInfo 返回字段。
+"""BIN-FUNC-006：pause/resume/stop 回放。
 
-对应用例：06_Bin录制回放解析.md -> BIN-FUNC-002
-可自动化：auto（设备上电、在范围内为运行前置；测试中无需人工动作）
+对应用例：06_Bin录制回放解析.md -> BIN-FUNC-006
+可自动化：auto（设备上电、在范围内为运行前置）
 
 流程：
-  1) setLogPath(True, 受控目录) + setDebugEnabled(True)
-  2) scan -> requireSensor -> connect -> 到达 Ready -> init
-  3) setParam("DEBUG_BLE_DATA_PATH", "True") 开启 bin 导出（注意：值为字符串 "True"）
-  4) startDataNotification 起流，采集数秒后 stopDataNotification、disconnect（close 写 header）
-  5) 通过 getParam("DEBUG_BLE_DATA_PATH") 读导出的 bin 路径（回退到目录扫描）
-  6) getBinFileInfo(bin_path) 并校验返回 dict 含 device_mac/device_name/chip_type/replay_duration
+  1) 生成有效 bin（connect → 起流 → 采集 30s → stop → disconnect）
+  2) 在子线程中启动 replayBinFile(path, sensor, realtime=True) 按原始节奏回放
+  3) 主线程等待数据开始流动，记录当前批数
+  4) 调用 pauseBinReplay(sensor)，校验返回 "OK"，等待 3s 后验证批数不再增长
+  5) 调用 resumeBinReplay(sensor)，校验返回 "OK"，等待 3s 后验证批数恢复增长
+  6) 调用 stopBinReplay(sensor)，校验返回 "OK"，等待子线程结束
 
 说明：
-  README：getBinFileInfo(file_path) -> Optional[dict]，返回 dict 字段包括 device_mac、
-  device_name、chip_type、is_universal_stream、feature_map、device_info、sensor_datas、
-  replay_duration（录制秒数，在 close 时写入 header）；文件不存在或无 config record 时
-  返回 None。
-  本用例只校验"返回 dict 且含四个关键字段（非空）"，不校验字段值语义（值一致性见
-  FUNC-009、元数据完整性见后续）。
-  注意 DEBUG_BLE_DATA_PATH 的值是字符串 "True"/"False"，不是 Python bool。
+  README：pauseBinReplay/resumeBinReplay/stopBinReplay 均返回 "OK" 或错误字符串。
+  replayBinFile 是阻塞调用，因此需要在子线程中执行，主线程负责控制。
+  录制 30s + realtime=True 按原始节奏回放，给 pause/resume/stop 留出充足操作窗口。
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
@@ -31,6 +27,7 @@ import re
 import sys
 import time
 import tempfile
+import threading
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUTOMATION_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
@@ -41,22 +38,11 @@ import config
 import common
 from common import record, _identity_of, match_target
 
-COLLECT_SECONDS = 3  # 起流后采集时长（秒），确保 bin 有数据且 replay_duration > 0
-REQUIRED_KEYS = ["device_mac", "device_name", "chip_type", "replay_duration"]
-
-
-def _nonempty(v):
-    """字段非空：None 视为空；字符串去空白后非空；其他类型（如 chip_type 的 int）非 None 即视为非空。"""
-    if v is None:
-        return False
-    if isinstance(v, str):
-        return bool(v.strip())
-    return True
-
-
-def _base_name(name):
-    """去掉广播名里的 (XXXX) 尾巴，得到设备基础名（如 OYWW1100(80F3) -> OYWW1100）。"""
-    return re.sub(r"\([0-9A-Fa-f]{4}\)\s*$", "", (name or "")).strip()
+COLLECT_SECONDS = 30  # 起流采集时长（秒）：录制足够长，确保回放有充足窗口执行 pause/resume/stop
+SETTLE_SECONDS = 2  # 停流后的刹车时间（秒）
+PAUSE_SLEEP = 3  # pause 后观察窗口（秒）
+RESUME_SLEEP = 3  # resume 后观察窗口（秒）
+THREAD_JOIN_TIMEOUT = 60  # 等待回放子线程结束的超时（秒）
 
 
 def _list_bins(log_dir):
@@ -79,11 +65,41 @@ def _get_ble_path(sensor):
         return f"抛异常 {type(e).__name__}: {e}"
 
 
+class BatchCounter:
+    """onDataCallback 计数，线程安全。"""
+
+    def __init__(self):
+        self.count = 0
+        self.lock = threading.Lock()
+
+    def __call__(self, sensor, data):
+        items = data if isinstance(data, list) else [data]
+        with self.lock:
+            self.count += len(items)
+
+    def snapshot(self):
+        with self.lock:
+            return self.count
+
+
+def _call_ctrl(method, *args):
+    """调用 controller 方法并返回 (返回值, 异常信息)。"""
+    try:
+        r = method(*args)
+        return r, None
+    except Exception as e:
+        return None, f"抛异常 {type(e).__name__}: {e}"
+
+
+def _on_error(sensor, reason):
+    print(f"[onErrorCallback] {getattr(sensor, 'BLEDevice', None)}: {reason}", flush=True)
+
+
 def main():
     ctrl = SensorControllerInstance
 
     print("=" * 60, flush=True)
-    print("BIN-FUNC-002 getBinFileInfo 返回字段", flush=True)
+    print("BIN-FUNC-006 pause/resume/stop 回放", flush=True)
     print("=" * 60, flush=True)
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
@@ -97,7 +113,6 @@ def main():
 
     results = []
 
-    # 受控日志目录
     log_dir = tempfile.mkdtemp(prefix="sdklog_bin_")
     print(f"\n[日志目录] 使用受控目录 {log_dir}", flush=True)
     try:
@@ -118,7 +133,6 @@ def main():
 
     bins_before = _list_bins(log_dir)
 
-    # 环境检查
     is_enable = ctrl.isEnable
     print(f"\n[环境检查] SensorController.isEnable = {is_enable}", flush=True)
     if is_enable is not True:
@@ -126,7 +140,6 @@ def main():
         ctrl.terminate()
         return
 
-    # 扫描匹配
     print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
     try:
         devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
@@ -147,10 +160,6 @@ def main():
     print(f"[扫描] 目标设备: {name} {addr}", flush=True)
     record(results, "scan 匹配到目标设备", True, "scan 返回含目标设备", f"匹配到 {name} {addr}")
 
-    base_name = _base_name(name)
-    identity = _identity_of(name)
-
-    # requireSensor
     sensor = ctrl.requireSensor(target)
     if sensor is None:
         print("[FAIL] SensorController.requireSensor 返回 None", flush=True)
@@ -161,7 +170,8 @@ def main():
     record(results, "requireSensor 返回 SensorProfile", isinstance(sensor, SensorProfile),
            "返回 SensorProfile", f"返回 {type(sensor).__name__}")
 
-    # connect
+    sensor.onErrorCallback = _on_error
+
     print("\n[连接] SensorProfile.connect() ...", flush=True)
     try:
         ok = sensor.connect()
@@ -173,7 +183,6 @@ def main():
     record(results, "SensorProfile.connect 返回 True", ok is True,
            "connect() 返回 True", f"connect() -> {connect_txt}")
 
-    # 到达 Ready
     t0 = time.time()
     while time.time() - t0 < 15 and sensor.deviceState != DeviceStateEx.Ready:
         time.sleep(0.2)
@@ -190,7 +199,6 @@ def main():
         ctrl.terminate()
         return
 
-    # init
     print(f"\n[init] SensorProfile.init({config.PACKAGE_SAMPLE_COUNT}, {config.POWER_REFRESH_INTERVAL_MS}) ...", flush=True)
     try:
         iret = sensor.init(config.PACKAGE_SAMPLE_COUNT, config.POWER_REFRESH_INTERVAL_MS)
@@ -201,7 +209,6 @@ def main():
     print(f"[init] SensorProfile.init() -> {init_txt}", flush=True)
     record(results, "SensorProfile.init 返回 True", iret is True, "init() 返回 True", f"init() -> {init_txt}")
 
-    # 开启 bin 导出（值必须为字符串 "True"）
     print("\n[bin] setParam('DEBUG_BLE_DATA_PATH', 'True') ...", flush=True)
     try:
         bret = sensor.setParam("DEBUG_BLE_DATA_PATH", "True")
@@ -211,7 +218,7 @@ def main():
     record(results, "setParam('DEBUG_BLE_DATA_PATH', 'True') 返回 OK", bret == "OK",
            "setParam 返回 'OK'", f"setParam -> {bret!r}")
 
-    # 起流
+    # ---- 实时采集，生成 bin ----
     print("\n[起流] SensorProfile.startDataNotification() ...", flush=True)
     try:
         sret = sensor.startDataNotification()
@@ -223,10 +230,9 @@ def main():
     record(results, "SensorProfile.startDataNotification 返回 True", sret is True,
            "startDataNotification() 返回 True", f"startDataNotification() -> {start_txt}")
 
-    print(f"\n[采集] 等待 {COLLECT_SECONDS}s 让数据流产生并录制 ...", flush=True)
+    print(f"\n[采集] 等待 {COLLECT_SECONDS}s ...", flush=True)
     time.sleep(COLLECT_SECONDS)
 
-    # 停流 + 断开（触发 bin 导出 + close 写 header）
     try:
         sensor.stopDataNotification()
     except Exception as e:
@@ -246,11 +252,9 @@ def main():
 
     time.sleep(0.5)
 
-    # 取 bin 路径
     bins_after = _list_bins(log_dir)
     new_bins = sorted(set(bins_after.keys()) - set(bins_before.keys()))
-    print(f"\n[检查] 日志目录 {log_dir}", flush=True)
-    print(f"[检查] 新增 .bin 文件: {new_bins if new_bins else '无'}", flush=True)
+    print(f"\n[检查] 新增 .bin 文件: {new_bins if new_bins else '无'}", flush=True)
 
     bin_path = ble_path if (isinstance(ble_path, str) and ble_path.strip()) else None
     if bin_path is None and new_bins:
@@ -258,14 +262,15 @@ def main():
 
     have_bin = bool(bin_path) and os.path.isfile(bin_path)
     print(f"[检查] bin 路径: {bin_path!r}，文件存在={have_bin}", flush=True)
-    record(results, "生成有效 bin 供 getBinFileInfo 使用", have_bin,
+    record(results, "生成有效 bin 供回放使用", have_bin,
            "存在可用 bin 文件", f"{bin_path!r}（存在={have_bin}）")
 
     if not have_bin:
-        record(results, "getBinFileInfo 返回含关键字段的 dict", None,
-               "返回 dict 且含 device_mac/device_name/chip_type/replay_duration",
-               "无有效 bin，无法执行 getBinFileInfo")
-        # 清理
+        record(results, "pauseBinReplay 返回 OK", None, "返回 'OK'", "无有效 bin")
+        record(results, "pause 后批数停止增长", None, "暂停后批数不变", "无有效 bin")
+        record(results, "resumeBinReplay 返回 OK", None, "返回 'OK'", "无有效 bin")
+        record(results, "resume 后批数恢复增长", None, "恢复后批数增加", "无有效 bin")
+        record(results, "stopBinReplay 返回 OK", None, "返回 'OK'", "无有效 bin")
         try:
             sensor.setParam("DEBUG_BLE_DATA_PATH", "False")
         except Exception:
@@ -278,50 +283,72 @@ def main():
         print("\n结论: FAIL", flush=True)
         return
 
-    # getBinFileInfo
-    print("\n[getBinFileInfo] SensorController.getBinFileInfo(bin_path) ...", flush=True)
-    try:
-        info = ctrl.getBinFileInfo(bin_path)
-        info_txt = f"返回 {type(info).__name__}"
-    except Exception as e:
-        info = None
-        info_txt = f"抛异常 {type(e).__name__}: {e}"
-    print(f"[getBinFileInfo] {info_txt}", flush=True)
-    if isinstance(info, dict):
-        print(f"[getBinFileInfo] 字段: {sorted(info.keys())}", flush=True)
-        for k in REQUIRED_KEYS:
-            print(f"    {k} = {info.get(k)!r}", flush=True)
+    # ---- 回放控制测试 ----
+    counter = BatchCounter()
+    sensor.onDataCallback = counter
 
-    is_dict = isinstance(info, dict)
-    record(results, "getBinFileInfo 返回 dict（非 None）", is_dict,
-           "返回 dict", info_txt)
+    replay_error = [None]
 
-    if is_dict:
-        missing = [k for k in REQUIRED_KEYS if k not in info]
-        keys_ok = len(missing) == 0
-        record(results, "返回含 device_mac/device_name/chip_type/replay_duration 字段", keys_ok,
-               f"dict 含 {REQUIRED_KEYS}", f"缺失 {missing}" if missing else f"含全部 {REQUIRED_KEYS}")
+    def replay_thread():
+        try:
+            ctrl.replayBinFile(bin_path, sensor, realtime=True)
+        except Exception as e:
+            replay_error[0] = f"{type(e).__name__}: {e}"
 
-        # 关键字段非空/数值合理
-        dm = info.get("device_mac")
-        dn = info.get("device_name")
-        ct = info.get("chip_type")
-        rd = info.get("replay_duration")
-        nonempty_ok = _nonempty(dm) and _nonempty(dn) and _nonempty(ct)
-        rd_ok = isinstance(rd, (int, float)) and rd >= 0
-        record(results, "device_mac/device_name/chip_type 非空", nonempty_ok,
-               "device_mac/device_name 非空字符串，chip_type 非 None",
-               f"device_mac={dm!r} device_name={dn!r} chip_type={ct!r}")
-        record(results, "replay_duration 为数值且 >=0", rd_ok,
-               "replay_duration 为数值且 >=0", f"replay_duration={rd!r}")
-    else:
-        record(results, "返回含 device_mac/device_name/chip_type/replay_duration 字段", None,
-               f"dict 含 {REQUIRED_KEYS}", "getBinFileInfo 未返回 dict，跳过字段校验")
-        record(results, "device_mac/device_name/chip_type 非空", None,
-               "device_mac/device_name 非空字符串，chip_type 非 None",
-               "getBinFileInfo 未返回 dict，跳过字段校验")
-        record(results, "replay_duration 为数值且 >=0", None,
-               "replay_duration 为数值且 >=0", "getBinFileInfo 未返回 dict，跳过字段校验")
+    print(f"\n[回放] 在子线程中启动 replayBinFile(realtime=True, 录制 {COLLECT_SECONDS}s) ...", flush=True)
+    t = threading.Thread(target=replay_thread, daemon=True)
+    t.start()
+
+    # 等待数据开始流动
+    time.sleep(1)
+    before_pause = counter.snapshot()
+    print(f"[回放] 当前批数 = {before_pause}", flush=True)
+    record(results, "回放开始产生数据", before_pause > 0,
+           "进入回放后 count > 0", f"before_pause={before_pause}")
+
+    # ---- pause ----
+    r, err = _call_ctrl(ctrl.pauseBinReplay, sensor)
+    print(f"[pause] pauseBinReplay -> {r!r}  err={err}", flush=True)
+    pause_ok = (r == "OK")
+    record(results, "pauseBinReplay 返回 OK", pause_ok,
+           "返回 'OK'", f"返回 {r!r}  err={err}")
+
+    time.sleep(PAUSE_SLEEP)
+    during_pause = counter.snapshot()
+    paused_growth = during_pause - before_pause
+    print(f"[pause] 暂停 {PAUSE_SLEEP}s 后批数 = {during_pause}（增长 {paused_growth}）", flush=True)
+    stopped = paused_growth <= 5
+    record(results, "pause 后批数停止增长", stopped,
+           "pause 后批数增长 <= 5", f"增长 {paused_growth}")
+
+    # ---- resume ----
+    r, err = _call_ctrl(ctrl.resumeBinReplay, sensor)
+    print(f"[resume] resumeBinReplay -> {r!r}  err={err}", flush=True)
+    resume_ok = (r == "OK")
+    record(results, "resumeBinReplay 返回 OK", resume_ok,
+           "返回 'OK'", f"返回 {r!r}  err={err}")
+
+    time.sleep(RESUME_SLEEP)
+    after_resume = counter.snapshot()
+    resumed_growth = after_resume - during_pause
+    print(f"[resume] resume {RESUME_SLEEP}s 后批数 = {after_resume}（增长 {resumed_growth}）", flush=True)
+    resumed = resumed_growth > 0
+    record(results, "resume 后批数恢复增长", resumed,
+           "resume 后批数增长 > 0", f"增长 {resumed_growth}")
+
+    # ---- stop ----
+    r, err = _call_ctrl(ctrl.stopBinReplay, sensor)
+    print(f"[stop] stopBinReplay -> {r!r}  err={err}", flush=True)
+    stop_ok = (r == "OK")
+    record(results, "stopBinReplay 返回 OK", stop_ok,
+           "返回 'OK'", f"返回 {r!r}  err={err}")
+
+    # 等待子线程结束
+    t.join(timeout=THREAD_JOIN_TIMEOUT)
+    thread_done = not t.is_alive()
+    record(results, "stop 后回放子线程结束", thread_done,
+           f"子线程在 {THREAD_JOIN_TIMEOUT}s 内结束",
+           f"子线程{'已结束' if thread_done else '仍在运行'}" + (f" err={replay_error[0]}" if replay_error[0] else ""))
 
     # 清理
     try:

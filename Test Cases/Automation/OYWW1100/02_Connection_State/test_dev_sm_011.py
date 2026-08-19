@@ -22,7 +22,6 @@
 """
 
 import os
-import re
 import sys
 import time
 
@@ -36,16 +35,7 @@ import config
 READY_TIMEOUT = 15     # 单台连接后等待 Ready 超时（秒）
 COLLECT_SECONDS = 3    # 起流后采集时长（秒）
 
-
-def record(results, name, ok, expect, actual):
-    # ok: True=PASS, False=FAIL, None=SKIP
-    status = "PASS" if ok is True else ("FAIL" if ok is False else "SKIP")
-    results.append((name, status, expect, actual))
-
-
-def _identity_of(name):
-    m = re.search(r"\(([0-9A-Fa-f]{4})\)", name or "")
-    return m.group(1).upper() if m else None
+from common import record, _identity_of
 
 
 def _tag_of(d):

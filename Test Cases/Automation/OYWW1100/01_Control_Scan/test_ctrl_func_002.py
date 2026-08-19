@@ -24,10 +24,7 @@ sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
 import config
-
-
-def record(results, name, ok, expect, actual):
-    results.append((name, "PASS" if ok else "FAIL", expect, actual))
+from common import record
 
 
 def wait_for_event(events, baseline, timeout=8.0):

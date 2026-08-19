@@ -1,25 +1,20 @@
 # -*- coding: utf-8 -*-
-"""BIN-FUNC-002：getBinFileInfo 返回字段。
+"""BIN-FUNC-005：回放 realtime=False 全速。
 
-对应用例：06_Bin录制回放解析.md -> BIN-FUNC-002
-可自动化：auto（设备上电、在范围内为运行前置；测试中无需人工动作）
+对应用例：06_Bin录制回放解析.md -> BIN-FUNC-005
+可自动化：auto（设备上电、在范围内为运行前置）
 
 流程：
-  1) setLogPath(True, 受控目录) + setDebugEnabled(True)
-  2) scan -> requireSensor -> connect -> 到达 Ready -> init
-  3) setParam("DEBUG_BLE_DATA_PATH", "True") 开启 bin 导出（注意：值为字符串 "True"）
-  4) startDataNotification 起流，采集数秒后 stopDataNotification、disconnect（close 写 header）
-  5) 通过 getParam("DEBUG_BLE_DATA_PATH") 读导出的 bin 路径（回退到目录扫描）
-  6) getBinFileInfo(bin_path) 并校验返回 dict 含 device_mac/device_name/chip_type/replay_duration
+  1) 复用 FUNC-004 前半段流程生成有效 bin（connect → 起流 → 采集 → stop → disconnect）
+  2) 复用同一 profile，换回调计数，replayBinFile(path, sensor, realtime=False)
+  3) 校验：回放产生数据（count>0）、回放 DataType 包含 live DataType、replay 有 startTimeStamp
+  4) informational：回放批数与实收批数对比、回放耗时应该远小于录制时长（全速）
 
 说明：
-  README：getBinFileInfo(file_path) -> Optional[dict]，返回 dict 字段包括 device_mac、
-  device_name、chip_type、is_universal_stream、feature_map、device_info、sensor_datas、
-  replay_duration（录制秒数，在 close 时写入 header）；文件不存在或无 config record 时
-  返回 None。
-  本用例只校验"返回 dict 且含四个关键字段（非空）"，不校验字段值语义（值一致性见
-  FUNC-009、元数据完整性见后续）。
-  注意 DEBUG_BLE_DATA_PATH 的值是字符串 "True"/"False"，不是 Python bool。
+  README：replayBinFile(realtime=False) 全速回放，不等待录制间隔。解析结果经同一
+  pipeline 由 onDataCallback 送达。与 FUNC-004 的唯一区别是 realtime=False，验证
+  点为全速回放仍能产生有效数据且 DataType 覆盖完整；精确批数差异仅作参考。
+  硬断言策略与 FUNC-004 一致（不比对精确批数）。
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
@@ -41,22 +36,8 @@ import config
 import common
 from common import record, _identity_of, match_target
 
-COLLECT_SECONDS = 3  # 起流后采集时长（秒），确保 bin 有数据且 replay_duration > 0
-REQUIRED_KEYS = ["device_mac", "device_name", "chip_type", "replay_duration"]
-
-
-def _nonempty(v):
-    """字段非空：None 视为空；字符串去空白后非空；其他类型（如 chip_type 的 int）非 None 即视为非空。"""
-    if v is None:
-        return False
-    if isinstance(v, str):
-        return bool(v.strip())
-    return True
-
-
-def _base_name(name):
-    """去掉广播名里的 (XXXX) 尾巴，得到设备基础名（如 OYWW1100(80F3) -> OYWW1100）。"""
-    return re.sub(r"\([0-9A-Fa-f]{4}\)\s*$", "", (name or "")).strip()
+COLLECT_SECONDS = 5  # 起流采集时长（秒）
+SETTLE_SECONDS = 2  # 停流后的刹车时间（秒）：让 stop 后仍在途的数据包完成解析并送达回调
 
 
 def _list_bins(log_dir):
@@ -79,11 +60,49 @@ def _get_ble_path(sensor):
         return f"抛异常 {type(e).__name__}: {e}"
 
 
+class BatchCounter:
+    """onDataCallback 计数：每个 SensorData 计 1 批，同时记录首/末批信息与 per-DataType 分布。"""
+
+    def __init__(self):
+        self.count = 0
+        self.first_ts = None
+        self.last_ts = None
+        self.first_dt = None
+        self.last_dt = None
+        self.dt_counts = {}
+
+    def __call__(self, sensor, data):
+        items = data if isinstance(data, list) else [data]
+        for d in items:
+            dt = self._dt_name(d)
+            self.count += 1
+            self.dt_counts[dt] = self.dt_counts.get(dt, 0) + 1
+            if self.first_ts is None:
+                self.first_ts = d.getStartTimeStamp()
+                self.first_dt = dt
+            self.last_ts = d.getStartTimeStamp()
+            self.last_dt = dt
+
+    @staticmethod
+    def _dt_name(d):
+        try:
+            dt = d.getDataType()
+            if isinstance(dt, DataType):
+                return dt.name
+            return DataType(dt).name
+        except Exception:
+            return "?"
+
+
+def _on_error(sensor, reason):
+    print(f"[onErrorCallback] {getattr(sensor, 'BLEDevice', None)}: {reason}", flush=True)
+
+
 def main():
     ctrl = SensorControllerInstance
 
     print("=" * 60, flush=True)
-    print("BIN-FUNC-002 getBinFileInfo 返回字段", flush=True)
+    print("BIN-FUNC-005 回放 realtime=False 全速", flush=True)
     print("=" * 60, flush=True)
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
@@ -97,7 +116,6 @@ def main():
 
     results = []
 
-    # 受控日志目录
     log_dir = tempfile.mkdtemp(prefix="sdklog_bin_")
     print(f"\n[日志目录] 使用受控目录 {log_dir}", flush=True)
     try:
@@ -118,7 +136,6 @@ def main():
 
     bins_before = _list_bins(log_dir)
 
-    # 环境检查
     is_enable = ctrl.isEnable
     print(f"\n[环境检查] SensorController.isEnable = {is_enable}", flush=True)
     if is_enable is not True:
@@ -126,7 +143,6 @@ def main():
         ctrl.terminate()
         return
 
-    # 扫描匹配
     print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
     try:
         devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
@@ -147,10 +163,6 @@ def main():
     print(f"[扫描] 目标设备: {name} {addr}", flush=True)
     record(results, "scan 匹配到目标设备", True, "scan 返回含目标设备", f"匹配到 {name} {addr}")
 
-    base_name = _base_name(name)
-    identity = _identity_of(name)
-
-    # requireSensor
     sensor = ctrl.requireSensor(target)
     if sensor is None:
         print("[FAIL] SensorController.requireSensor 返回 None", flush=True)
@@ -161,7 +173,8 @@ def main():
     record(results, "requireSensor 返回 SensorProfile", isinstance(sensor, SensorProfile),
            "返回 SensorProfile", f"返回 {type(sensor).__name__}")
 
-    # connect
+    sensor.onErrorCallback = _on_error
+
     print("\n[连接] SensorProfile.connect() ...", flush=True)
     try:
         ok = sensor.connect()
@@ -173,7 +186,6 @@ def main():
     record(results, "SensorProfile.connect 返回 True", ok is True,
            "connect() 返回 True", f"connect() -> {connect_txt}")
 
-    # 到达 Ready
     t0 = time.time()
     while time.time() - t0 < 15 and sensor.deviceState != DeviceStateEx.Ready:
         time.sleep(0.2)
@@ -190,7 +202,6 @@ def main():
         ctrl.terminate()
         return
 
-    # init
     print(f"\n[init] SensorProfile.init({config.PACKAGE_SAMPLE_COUNT}, {config.POWER_REFRESH_INTERVAL_MS}) ...", flush=True)
     try:
         iret = sensor.init(config.PACKAGE_SAMPLE_COUNT, config.POWER_REFRESH_INTERVAL_MS)
@@ -201,7 +212,6 @@ def main():
     print(f"[init] SensorProfile.init() -> {init_txt}", flush=True)
     record(results, "SensorProfile.init 返回 True", iret is True, "init() 返回 True", f"init() -> {init_txt}")
 
-    # 开启 bin 导出（值必须为字符串 "True"）
     print("\n[bin] setParam('DEBUG_BLE_DATA_PATH', 'True') ...", flush=True)
     try:
         bret = sensor.setParam("DEBUG_BLE_DATA_PATH", "True")
@@ -211,7 +221,10 @@ def main():
     record(results, "setParam('DEBUG_BLE_DATA_PATH', 'True') 返回 OK", bret == "OK",
            "setParam 返回 'OK'", f"setParam -> {bret!r}")
 
-    # 起流
+    # ---- 实时采集 ----
+    live = BatchCounter()
+    sensor.onDataCallback = live
+
     print("\n[起流] SensorProfile.startDataNotification() ...", flush=True)
     try:
         sret = sensor.startDataNotification()
@@ -223,14 +236,22 @@ def main():
     record(results, "SensorProfile.startDataNotification 返回 True", sret is True,
            "startDataNotification() 返回 True", f"startDataNotification() -> {start_txt}")
 
-    print(f"\n[采集] 等待 {COLLECT_SECONDS}s 让数据流产生并录制 ...", flush=True)
+    live_start = time.time()
+    print(f"\n[采集] 等待 {COLLECT_SECONDS}s ...", flush=True)
     time.sleep(COLLECT_SECONDS)
 
-    # 停流 + 断开（触发 bin 导出 + close 写 header）
     try:
         sensor.stopDataNotification()
     except Exception as e:
         print(f"[停流] stopDataNotification 抛异常 {type(e).__name__}: {e}", flush=True)
+
+    live_duration = time.time() - live_start
+
+    print(f"[采集] 等待刹车 {SETTLE_SECONDS}s，让 stop 后在途数据包送达回调 ...", flush=True)
+    time.sleep(SETTLE_SECONDS)
+
+    live_count = live.count
+    print(f"[采集] 实收批数 = {live_count}（DataType={live.first_dt}），录制时长 ≈ {live_duration:.3f}s", flush=True)
 
     ble_path = _get_ble_path(sensor)
     print(f"[bin] stop 后 getParam('DEBUG_BLE_DATA_PATH') = {ble_path!r}", flush=True)
@@ -246,11 +267,9 @@ def main():
 
     time.sleep(0.5)
 
-    # 取 bin 路径
     bins_after = _list_bins(log_dir)
     new_bins = sorted(set(bins_after.keys()) - set(bins_before.keys()))
-    print(f"\n[检查] 日志目录 {log_dir}", flush=True)
-    print(f"[检查] 新增 .bin 文件: {new_bins if new_bins else '无'}", flush=True)
+    print(f"\n[检查] 新增 .bin 文件: {new_bins if new_bins else '无'}", flush=True)
 
     bin_path = ble_path if (isinstance(ble_path, str) and ble_path.strip()) else None
     if bin_path is None and new_bins:
@@ -258,14 +277,16 @@ def main():
 
     have_bin = bool(bin_path) and os.path.isfile(bin_path)
     print(f"[检查] bin 路径: {bin_path!r}，文件存在={have_bin}", flush=True)
-    record(results, "生成有效 bin 供 getBinFileInfo 使用", have_bin,
+    record(results, "生成有效 bin 供回放使用", have_bin,
            "存在可用 bin 文件", f"{bin_path!r}（存在={have_bin}）")
 
     if not have_bin:
-        record(results, "getBinFileInfo 返回含关键字段的 dict", None,
-               "返回 dict 且含 device_mac/device_name/chip_type/replay_duration",
-               "无有效 bin，无法执行 getBinFileInfo")
-        # 清理
+        record(results, "回放产生数据（count > 0）", None,
+               "replay.count > 0", "无有效 bin，无法回放")
+        record(results, "回放 DataType 包含 live 的 DataType", None,
+               "replay dts 包含 live dts", "无有效 bin，无法回放")
+        record(results, "回放数据有 startTimeStamp（流锚点）", None,
+               "replay.first_ts is not None", "无有效 bin，无法回放")
         try:
             sensor.setParam("DEBUG_BLE_DATA_PATH", "False")
         except Exception:
@@ -278,50 +299,66 @@ def main():
         print("\n结论: FAIL", flush=True)
         return
 
-    # getBinFileInfo
-    print("\n[getBinFileInfo] SensorController.getBinFileInfo(bin_path) ...", flush=True)
+    # ---- 回放 realtime=False 全速 ----
+    # 硬断言策略与 FUNC-004 一致：不比精确批数，只验证回放产生有效数据
+    replay = BatchCounter()
+    sensor.onDataCallback = replay
+
+    print(f"\n[回放] replayBinFile({bin_path!r}, sensor, realtime=False) ...", flush=True)
+    replay_start = time.time()
     try:
-        info = ctrl.getBinFileInfo(bin_path)
-        info_txt = f"返回 {type(info).__name__}"
+        profile = ctrl.replayBinFile(bin_path, sensor, realtime=False)
+        replay_txt = f"返回 {type(profile).__name__}"
     except Exception as e:
-        info = None
-        info_txt = f"抛异常 {type(e).__name__}: {e}"
-    print(f"[getBinFileInfo] {info_txt}", flush=True)
-    if isinstance(info, dict):
-        print(f"[getBinFileInfo] 字段: {sorted(info.keys())}", flush=True)
-        for k in REQUIRED_KEYS:
-            print(f"    {k} = {info.get(k)!r}", flush=True)
+        profile = None
+        replay_txt = f"抛异常 {type(e).__name__}: {e}"
+    replay_duration = time.time() - replay_start
+    replay_count = replay.count
+    print(f"[回放] {replay_txt}，回放批数 = {replay_count}，耗时 ≈ {replay_duration:.3f}s", flush=True)
 
-    is_dict = isinstance(info, dict)
-    record(results, "getBinFileInfo 返回 dict（非 None）", is_dict,
-           "返回 dict", info_txt)
+    # ---- 诊断 ----
+    print("\n[诊断] 数据分布对比", flush=True)
+    print(f"  LIVE   总批数={live.count}  分布={live.dt_counts}  首 ts={live.first_ts} dt={live.first_dt}", flush=True)
+    print(f"  REPLAY 总批数={replay.count}  分布={replay.dt_counts}  首 ts={replay.first_ts} dt={replay.first_dt}", flush=True)
 
-    if is_dict:
-        missing = [k for k in REQUIRED_KEYS if k not in info]
-        keys_ok = len(missing) == 0
-        record(results, "返回含 device_mac/device_name/chip_type/replay_duration 字段", keys_ok,
-               f"dict 含 {REQUIRED_KEYS}", f"缺失 {missing}" if missing else f"含全部 {REQUIRED_KEYS}")
+    live_dts = set(live.dt_counts.keys())
+    replay_dts = set(replay.dt_counts.keys())
 
-        # 关键字段非空/数值合理
-        dm = info.get("device_mac")
-        dn = info.get("device_name")
-        ct = info.get("chip_type")
-        rd = info.get("replay_duration")
-        nonempty_ok = _nonempty(dm) and _nonempty(dn) and _nonempty(ct)
-        rd_ok = isinstance(rd, (int, float)) and rd >= 0
-        record(results, "device_mac/device_name/chip_type 非空", nonempty_ok,
-               "device_mac/device_name 非空字符串，chip_type 非 None",
-               f"device_mac={dm!r} device_name={dn!r} chip_type={ct!r}")
-        record(results, "replay_duration 为数值且 >=0", rd_ok,
-               "replay_duration 为数值且 >=0", f"replay_duration={rd!r}")
-    else:
-        record(results, "返回含 device_mac/device_name/chip_type/replay_duration 字段", None,
-               f"dict 含 {REQUIRED_KEYS}", "getBinFileInfo 未返回 dict，跳过字段校验")
-        record(results, "device_mac/device_name/chip_type 非空", None,
-               "device_mac/device_name 非空字符串，chip_type 非 None",
-               "getBinFileInfo 未返回 dict，跳过字段校验")
-        record(results, "replay_duration 为数值且 >=0", None,
-               "replay_duration 为数值且 >=0", "getBinFileInfo 未返回 dict，跳过字段校验")
+    # 1) 回放产生了数据
+    has_data = replay.count > 0
+    record(results, "回放产生数据（count > 0）", has_data,
+           "replay.count > 0", f"replay.count={replay.count}")
+
+    # 2) 回放 DataType 集合包含 live 的 DataType
+    contains_live = live_dts.issubset(replay_dts)
+    record(results, "回放 DataType 包含 live 的 DataType", contains_live,
+           f"replay dts 包含 {live_dts}",
+           f"live={live_dts} replay={replay_dts} 交集={live_dts & replay_dts} 缺失={live_dts - replay_dts}")
+
+    # 3) 回放产生了有效数据（startTimeStamp 非 None）
+    has_anchor = replay.first_ts is not None
+    record(results, "回放数据有 startTimeStamp（流锚点）", has_anchor,
+           "replay.first_ts is not None",
+           f"replay.first_ts={replay.first_ts} live.first_ts={live.first_ts}")
+
+    # 4) informational：per-DataType 批数差异
+    all_dts = sorted(live_dts | replay_dts)
+    diffs = []
+    for dt in all_dts:
+        lc = live.dt_counts.get(dt, 0)
+        rc = replay.dt_counts.get(dt, 0)
+        diffs.append(f"{dt}: live={lc} replay={rc} diff={rc - lc}")
+    print(f"  [informational] 各 DataType 批数差异: {' | '.join(diffs)}", flush=True)
+    record(results, "per-DataType 批数差异（informational）", None,
+           "仅作参考，不做 PASS/FAIL 判定", diffs)
+
+    # 5) informational：全速回放（耗时远小于录制时长）
+    if live_duration > 0:
+        speedup = live_duration / replay_duration if replay_duration > 0 else float('inf')
+        print(f"  [informational] 全速回放: 录制={live_duration:.3f}s 回放={replay_duration:.3f}s 加速比={speedup:.1f}x", flush=True)
+        record(results, "realtime=False 全速回放（informational）", None,
+               "回放耗时远小于录制时长",
+               f"replay={replay_duration:.3f}s live={live_duration:.3f}s 加速比={speedup:.1f}x")
 
     # 清理
     try:

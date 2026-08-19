@@ -27,12 +27,9 @@ sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
 import config
+from common import record
 
 SCAN_PERIOD_MS = 3000  # 对应用例 startScan(3000)
-
-
-def record(results, name, ok, expect, actual):
-    results.append((name, "PASS" if ok else "FAIL", expect, actual))
 
 
 def _names(device_list):

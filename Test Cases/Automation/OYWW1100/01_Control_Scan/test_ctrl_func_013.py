@@ -21,7 +21,6 @@
 """
 
 import os
-import re
 import sys
 import threading
 import time
@@ -32,6 +31,7 @@ sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
 import config
+from common import record, _identity_of
 
 try:
     import psutil
@@ -39,16 +39,6 @@ try:
 except Exception:
     psutil = None
     _HAS_PSUTIL = False
-
-
-def record(results, name, ok, expect, actual):
-    results.append((name, "PASS" if ok else "FAIL", expect, actual))
-
-
-def _identity_of(name):
-    """从广播名（如 "OYWW1100(80F3)"）提取括号内后四位。"""
-    m = re.search(r"\(([0-9A-Fa-f]{4})\)", name or "")
-    return m.group(1).upper() if m else None
 
 
 def _safe_attr(ctrl, name, fn=None):

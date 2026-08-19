@@ -33,7 +33,6 @@
 """
 
 import os
-import re
 import subprocess
 import sys
 import time
@@ -55,35 +54,7 @@ SNAPSHOT_FIELDS = [
     "ConnectionIntervalMs", "PeripheralLatency", "SupervisionTimeoutMs", "MTUSize",
 ]
 
-
-def record(results, name, ok, expect, actual):
-    # ok: True=PASS, False=FAIL, None=SKIP
-    status = "PASS" if ok is True else ("FAIL" if ok is False else "SKIP")
-    results.append((name, status, expect, actual))
-
-
-def _identity_of(name):
-    m = re.search(r"\(([0-9A-Fa-f]{4})\)", name or "")
-    return m.group(1).upper() if m else None
-
-
-def _match_target(devices):
-    for cfg in config.DEVICES:
-        if not cfg.get("enabled", True):
-            continue
-        mac = (cfg.get("mac") or "").strip().upper()
-        identity = (cfg.get("identity") or "").strip().upper()
-        prefix = cfg.get("name_prefix") or ""
-        for d in devices:
-            addr = (getattr(d, 'Address', '') or '').upper()
-            name = getattr(d, 'Name', '') or ''
-            if mac and addr == mac:
-                return d
-            if identity and _identity_of(name) == identity:
-                return d
-            if not mac and not identity and prefix and name.startswith(prefix):
-                return d
-    return None
+from common import record, _identity_of, match_target
 
 
 def _wait_until(cond, timeout, interval=0.5, what=""):
@@ -145,7 +116,7 @@ def run_test():
     except Exception as e:
         devices = None
         print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    target = _match_target(devices)
+    target = match_target(devices)
 
     if target is None:
         print("[FAIL] 未匹配到 config 中启用的设备（OYWW1100/80F3）", flush=True)

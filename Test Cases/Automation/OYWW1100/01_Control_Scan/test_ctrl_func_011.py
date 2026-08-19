@@ -25,10 +25,7 @@ AUTOMATION_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
 sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
-
-
-def record(results, name, ok, expect, actual):
-    results.append((name, "PASS" if ok else "FAIL", expect, actual))
+from common import record
 
 
 def main():
