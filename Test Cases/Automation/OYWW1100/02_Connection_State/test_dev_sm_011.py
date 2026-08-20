@@ -2,14 +2,15 @@
 """DEV-SM-011：多台设备同时 connect 互不干扰。
 
 对应用例：02_连接与状态机.md -> DEV-SM-011
-可自动化：auto（无需人工介入，但需环境中存在 ≥2 台 config 中 enabled 的设备）
+可自动化：auto（需 TARGET_IDENTITY 中配置 ≥2 台设备 identity，如 "80F9,80F3"）
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
-  - 环境中 ≥2 台设备开机且在范围内（且这些设备都在 config.py 中 enabled=True）
+  - 环境中 ≥2 台设备开机且在范围内
+  - config.py 中 TARGET_IDENTITY 用逗号列出 ≥2 个 identity
 
 流程：
-  1) scan 匹配 config 中所有 enabled 设备（需 ≥2 台，否则 SKIP）
+  1) scan 匹配 common.TARGET_IDENTITIES 中所有设备（需 ≥2 台，否则 SKIP）
   2) 对每台 requireSensor -> connect -> 到达 Ready
   3) 全部连接后，断言每台仍各自 Ready（连接互不挤掉）
   4) 对每台 init -> startDataNotification 起流，各自 onDataCallback 收到数据
@@ -31,11 +32,12 @@ sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
 import config
+import common
 
 READY_TIMEOUT = 15     # 单台连接后等待 Ready 超时（秒）
 COLLECT_SECONDS = 3    # 起流后采集时长（秒）
 
-from common import record, _identity_of
+from common import record, _identity_of, match_target
 
 
 def _tag_of(d):
@@ -45,32 +47,20 @@ def _tag_of(d):
     return ident or (getattr(d, 'Address', '') or '?').upper()
 
 
-def _match_targets(devices):
-    """返回匹配 config 中所有 enabled 设备的目标列表 [(cfg, device)]（去重）。"""
+def _match_all_targets(devices):
+    """返回匹配 common.TARGET_IDENTITIES 中所有设备的目标列表 [(identity, device)]（去重）。"""
     matched = []
     seen = set()
-    for cfg in config.DEVICES:
-        if not cfg.get("enabled", True):
-            continue
-        mac = (cfg.get("mac") or "").strip().upper()
-        identity = (cfg.get("identity") or "").strip().upper()
-        prefix = cfg.get("name_prefix") or ""
-        for d in devices:
+    for tid in common.TARGET_IDENTITIES:
+        for d in (devices or []):
             addr = (getattr(d, 'Address', '') or '').upper()
             name = getattr(d, 'Name', '') or ''
-            hit = False
-            if mac and addr == mac:
-                hit = True
-            elif identity and _identity_of(name) == identity:
-                hit = True
-            elif not mac and not identity and prefix and name.startswith(prefix):
-                hit = True
-            if hit:
+            if _identity_of(name) == tid:
                 key = addr or name
                 if key and key in seen:
                     continue
                 seen.add(key)
-                matched.append((cfg, d))
+                matched.append((tid, d))
                 break
     return matched
 
@@ -97,20 +87,10 @@ def main():
     print("\n[前置条件]", flush=True)
     print("  - 主机(电脑)：蓝牙已开启", flush=True)
     print("  - 环境中 ≥2 台设备开机且在范围内", flush=True)
-    print("  - 这些设备都需在 config.py 中 enabled=True", flush=True)
-    # 动态列出当前 config 中的设备与启用状态
-    cfg_desc = []
-    for cfg in config.DEVICES:
-        prefix = cfg.get("name_prefix") or ""
-        ident = cfg.get("identity") or ""
-        mac = cfg.get("mac") or ""
-        enabled = cfg.get("enabled", True)
-        key = f"{prefix}({ident})" if ident else (mac or prefix or "?")
-        cfg_desc.append(f"{key} enabled={enabled}")
-    print(f"  - 当前 config 设备: {', '.join(cfg_desc)}", flush=True)
+    print(f"  - config.py 中 TARGET_IDENTITY = {config.TARGET_IDENTITY!r}（{len(common.TARGET_IDENTITIES)} 个目标）", flush=True)
 
     input("\n>>> [人工操作] 请确认 ≥2 台设备已【开机】且在范围内，"
-          "且已在 config.py 中设为 enabled=True，完成后按回车继续 ...")
+          "且 config.py 中 TARGET_IDENTITY 已列出 ≥2 个 identity，完成后按回车继续 ...")
 
     results = []
 
@@ -123,22 +103,27 @@ def main():
         return
 
     # 扫描匹配
-    print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
+    print(f"\n[扫描] 目标 identity: {common.TARGET_IDENTITIES}", flush=True)
+    print(f"[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
     try:
         devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
     except Exception as e:
         devices = None
         print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    matched = _match_targets(devices)
-    print(f"[扫描] 匹配到 {len(matched)} 台 enabled 设备", flush=True)
+    print(f"[扫描] 扫描到 {len(devices) if devices else 0} 台设备:", flush=True)
+    if devices:
+        for d in devices:
+            n = getattr(d, 'Name', '?')
+            a = getattr(d, 'Address', '?')
+            print(f"  {n} {a} identity={_identity_of(n)}", flush=True)
+    matched = _match_all_targets(devices)
+    print(f"[扫描] 匹配到 {len(matched)} 台目标设备", flush=True)
 
     if len(matched) < 2:
-        record(results, "环境中存在 ≥2 台 enabled 设备", None,
-               "scan 匹配到 ≥2 台 enabled 设备", f"仅 {len(matched)} 台")
-        disabled = [f"{c.get('name_prefix') or ''}({c.get('identity') or ''})"
-                    for c in config.DEVICES if not c.get('enabled', True)]
-        hint = f"（当前 enabled=False: {', '.join(disabled)}）" if disabled else ""
-        print(f"\n[SKIP] 需要 ≥2 台设备。请将第二台设备在 config.py 中设为 enabled=True 并开机后重跑。{hint}", flush=True)
+        record(results, "环境中存在 ≥2 台目标设备", None,
+               "scan 匹配到 ≥2 台目标设备", f"仅 {len(matched)} 台")
+        print(f"\n[SKIP] 需要 ≥2 台设备。当前 TARGET_IDENTITY = {config.TARGET_IDENTITY!r}（{len(common.TARGET_IDENTITIES)} 个目标），"
+              f"请确保 ≥2 台设备在范围内且 identity 已列入 TARGET_IDENTITY。", flush=True)
 
         print("\n" + "=" * 60, flush=True)
         print("测试结果汇总", flush=True)
@@ -149,12 +134,12 @@ def main():
         ctrl.terminate()
         return
 
-    record(results, "环境中存在 ≥2 台 enabled 设备", True,
-           "scan 匹配到 ≥2 台 enabled 设备", f"{len(matched)} 台")
+    record(results, "环境中存在 ≥2 台目标设备", True,
+           "scan 匹配到 ≥2 台目标设备", f"{len(matched)} 台")
 
     # requireSensor
     sensors = []  # [(tag, sensor, device)]
-    for cfg, d in matched:
+    for tid, d in matched:
         tag = _tag_of(d)
         sensor = ctrl.requireSensor(d)
         ok = isinstance(sensor, SensorProfile)

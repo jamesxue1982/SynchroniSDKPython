@@ -1,20 +1,18 @@
 # -*- coding: utf-8 -*-
-"""BIN-FUNC-005：回放 realtime=False 全速。
+"""BIN-FUNC-007：实时起流中拒绝回放。
 
-对应用例：06_Bin录制回放解析.md -> BIN-FUNC-005
+对应用例：06_Bin录制回放解析.md -> BIN-FUNC-007
 可自动化：auto（设备上电、在范围内为运行前置）
 
 流程：
-  1) 复用 FUNC-004 前半段流程生成有效 bin（connect → 起流 → 采集 → stop → disconnect）
-  2) 复用同一 profile，换回调计数，replayBinFile(path, sensor, realtime=False)
-  3) 校验：回放产生数据（count>0）、回放 DataType 包含 live DataType、replay 有 startTimeStamp
-  4) informational：回放批数与实收批数对比、回放耗时应该远小于录制时长（全速）
+  1) 生成有效 bin（connect → 起流 → 采集 → stop → disconnect）
+  2) 重新 connect → 到达 Ready → init → startDataNotification 起流
+  3) 起流过程中调用 replayBinFile(bin_path, sensor, realtime=True)
+  4) 断言：回放被拒绝（返回 None 或抛异常）
 
 说明：
-  README：replayBinFile(realtime=False) 全速回放，不等待录制间隔。解析结果经同一
-  pipeline 由 onDataCallback 送达。与 FUNC-004 的唯一区别是 realtime=False，验证
-  点为全速回放仍能产生有效数据且 DataType 覆盖完整；精确批数差异仅作参考。
-  硬断言策略与 FUNC-004 一致（不比对精确批数）。
+  README：replayBinFile 在目标 sensor 正在实时起流时应拒绝回放，状态互斥。
+  本用例先生成一个有效 bin，再重新连接起流，在起流中尝试回放，验证互斥。
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
@@ -36,8 +34,8 @@ import config
 import common
 from common import record, _identity_of, match_target
 
-COLLECT_SECONDS = 5  # 起流采集时长（秒）
-SETTLE_SECONDS = 2  # 停流后的刹车时间（秒）：让 stop 后仍在途的数据包完成解析并送达回调
+COLLECT_SECONDS = 5  # 起流采集时长（秒），用于生成 bin
+SETTLE_SECONDS = 2   # 停流后的刹车时间（秒）
 
 
 def _list_bins(log_dir):
@@ -60,40 +58,6 @@ def _get_ble_path(sensor):
         return f"抛异常 {type(e).__name__}: {e}"
 
 
-class BatchCounter:
-    """onDataCallback 计数：每个 SensorData 计 1 批，同时记录首/末批信息与 per-DataType 分布。"""
-
-    def __init__(self):
-        self.count = 0
-        self.first_ts = None
-        self.last_ts = None
-        self.first_dt = None
-        self.last_dt = None
-        self.dt_counts = {}
-
-    def __call__(self, sensor, data):
-        items = data if isinstance(data, list) else [data]
-        for d in items:
-            dt = self._dt_name(d)
-            self.count += 1
-            self.dt_counts[dt] = self.dt_counts.get(dt, 0) + 1
-            if self.first_ts is None:
-                self.first_ts = d.getStartTimeStamp()
-                self.first_dt = dt
-            self.last_ts = d.getStartTimeStamp()
-            self.last_dt = dt
-
-    @staticmethod
-    def _dt_name(d):
-        try:
-            dt = d.getDataType()
-            if isinstance(dt, DataType):
-                return dt.name
-            return DataType(dt).name
-        except Exception:
-            return "?"
-
-
 def _on_error(sensor, reason):
     print(f"[onErrorCallback] {getattr(sensor, 'BLEDevice', None)}: {reason}", flush=True)
 
@@ -102,7 +66,7 @@ def main():
     ctrl = SensorControllerInstance
 
     print("=" * 60, flush=True)
-    print("BIN-FUNC-005 回放 realtime=False 全速", flush=True)
+    print("BIN-FUNC-007 实时起流中拒绝回放", flush=True)
     print("=" * 60, flush=True)
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
@@ -182,6 +146,9 @@ def main():
 
     sensor.onErrorCallback = _on_error
 
+    # ---- 阶段 1：生成 bin ----
+    print("\n[阶段1] 生成 bin 文件 ...", flush=True)
+
     print("\n[连接] SensorProfile.connect() ...", flush=True)
     try:
         ok = sensor.connect()
@@ -228,10 +195,6 @@ def main():
     record(results, "setParam('DEBUG_BLE_DATA_PATH', 'True') 返回 OK", bret == "OK",
            "setParam 返回 'OK'", f"setParam -> {bret!r}")
 
-    # ---- 实时采集 ----
-    live = BatchCounter()
-    sensor.onDataCallback = live
-
     print("\n[起流] SensorProfile.startDataNotification() ...", flush=True)
     try:
         sret = sensor.startDataNotification()
@@ -240,10 +203,9 @@ def main():
         sret = None
         start_txt = f"抛异常 {type(e).__name__}: {e}"
     print(f"[起流] SensorProfile.startDataNotification() -> {start_txt}", flush=True)
-    record(results, "SensorProfile.startDataNotification 返回 True", sret is True,
+    record(results, "startDataNotification 返回 True", sret is True,
            "startDataNotification() 返回 True", f"startDataNotification() -> {start_txt}")
 
-    live_start = time.time()
     print(f"\n[采集] 等待 {COLLECT_SECONDS}s ...", flush=True)
     time.sleep(COLLECT_SECONDS)
 
@@ -251,14 +213,6 @@ def main():
         sensor.stopDataNotification()
     except Exception as e:
         print(f"[停流] stopDataNotification 抛异常 {type(e).__name__}: {e}", flush=True)
-
-    live_duration = time.time() - live_start
-
-    print(f"[采集] 等待刹车 {SETTLE_SECONDS}s，让 stop 后在途数据包送达回调 ...", flush=True)
-    time.sleep(SETTLE_SECONDS)
-
-    live_count = live.count
-    print(f"[采集] 实收批数 = {live_count}（DataType={live.first_dt}），录制时长 ≈ {live_duration:.3f}s", flush=True)
 
     ble_path = _get_ble_path(sensor)
     print(f"[bin] stop 后 getParam('DEBUG_BLE_DATA_PATH') = {ble_path!r}", flush=True)
@@ -288,12 +242,7 @@ def main():
            "存在可用 bin 文件", f"{bin_path!r}（存在={have_bin}）")
 
     if not have_bin:
-        record(results, "回放产生数据（count > 0）", None,
-               "replay.count > 0", "无有效 bin，无法回放")
-        record(results, "回放 DataType 包含 live 的 DataType", None,
-               "replay dts 包含 live dts", "无有效 bin，无法回放")
-        record(results, "回放数据有 startTimeStamp（流锚点）", None,
-               "replay.first_ts is not None", "无有效 bin，无法回放")
+        record(results, "起流中回放被拒绝", None, "回放返回 None 或抛异常", "无有效 bin")
         try:
             sensor.setParam("DEBUG_BLE_DATA_PATH", "False")
         except Exception:
@@ -306,66 +255,166 @@ def main():
         print("\n结论: FAIL", flush=True)
         return
 
-    # ---- 回放 realtime=False 全速 ----
-    # 硬断言策略与 FUNC-004 一致：不比精确批数，只验证回放产生有效数据
-    replay = BatchCounter()
-    sensor.onDataCallback = replay
+    # ---- 阶段 2：重新连接起流，在起流中尝试回放，验证录制不受影响 ----
+    print("\n[阶段2] 重新连接，起流中尝试回放，验证录制继续 ...", flush=True)
 
-    print(f"\n[回放] replayBinFile({bin_path!r}, sensor, realtime=False) ...", flush=True)
-    replay_start = time.time()
+    print("\n[连接] SensorProfile.connect() ...", flush=True)
     try:
-        profile = ctrl.replayBinFile(bin_path, sensor, realtime=False)
-        replay_txt = f"返回 {type(profile).__name__}"
+        ok = sensor.connect()
+        connect2_txt = f"返回 {ok}"
     except Exception as e:
-        profile = None
-        replay_txt = f"抛异常 {type(e).__name__}: {e}"
-    replay_duration = time.time() - replay_start
-    replay_count = replay.count
-    print(f"[回放] {replay_txt}，回放批数 = {replay_count}，耗时 ≈ {replay_duration:.3f}s", flush=True)
+        ok = None
+        connect2_txt = f"抛异常 {type(e).__name__}: {e}"
+    print(f"[连接] SensorProfile.connect() -> {connect2_txt}  state={sensor.deviceState}", flush=True)
+    record(results, "阶段2 connect 返回 True", ok is True,
+           "connect() 返回 True", f"connect() -> {connect2_txt}")
 
-    # ---- 诊断 ----
-    print("\n[诊断] 数据分布对比", flush=True)
-    print(f"  LIVE   总批数={live.count}  分布={live.dt_counts}  首 ts={live.first_ts} dt={live.first_dt}", flush=True)
-    print(f"  REPLAY 总批数={replay.count}  分布={replay.dt_counts}  首 ts={replay.first_ts} dt={replay.first_dt}", flush=True)
+    t0 = time.time()
+    while time.time() - t0 < 15 and sensor.deviceState != DeviceStateEx.Ready:
+        time.sleep(0.2)
+    ready2 = (sensor.deviceState == DeviceStateEx.Ready)
+    record(results, "阶段2 到达 Ready", ready2, "deviceState==Ready", f"state={sensor.deviceState}")
 
-    live_dts = set(live.dt_counts.keys())
-    replay_dts = set(replay.dt_counts.keys())
+    if not ready2:
+        print("[FAIL] 阶段2 未到达 Ready，无法继续", flush=True)
+        try:
+            sensor.disconnect()
+        except Exception:
+            pass
+        print("\n结论: FAIL", flush=True)
+        ctrl.terminate()
+        return
 
-    # 1) 回放产生了数据
-    has_data = replay.count > 0
-    record(results, "回放产生数据（count > 0）", has_data,
-           "replay.count > 0", f"replay.count={replay.count}")
+    print(f"\n[init] SensorProfile.init({config.PACKAGE_SAMPLE_COUNT}, {config.POWER_REFRESH_INTERVAL_MS}) ...", flush=True)
+    try:
+        iret = sensor.init(config.PACKAGE_SAMPLE_COUNT, config.POWER_REFRESH_INTERVAL_MS)
+        init2_txt = f"返回 {iret}"
+    except Exception as e:
+        iret = None
+        init2_txt = f"抛异常 {type(e).__name__}: {e}"
+    print(f"[init] init() -> {init2_txt}", flush=True)
+    record(results, "阶段2 init 返回 True", iret is True, "init() 返回 True", f"init() -> {init2_txt}")
 
-    # 2) 回放 DataType 集合包含 live 的 DataType
-    contains_live = live_dts.issubset(replay_dts)
-    record(results, "回放 DataType 包含 live 的 DataType", contains_live,
-           f"replay dts 包含 {live_dts}",
-           f"live={live_dts} replay={replay_dts} 交集={live_dts & replay_dts} 缺失={live_dts - replay_dts}")
+    # 阶段 2 也开启 bin 导出，以便后续验证 bin 时长覆盖了回放拒绝后的时间
+    print("\n[bin] setParam('DEBUG_BLE_DATA_PATH', 'True') ...", flush=True)
+    try:
+        bret2 = sensor.setParam("DEBUG_BLE_DATA_PATH", "True")
+    except Exception as e:
+        bret2 = f"抛异常 {type(e).__name__}: {e}"
+    print(f"[bin] setParam('DEBUG_BLE_DATA_PATH', 'True') -> {bret2!r}", flush=True)
+    record(results, "阶段2 setParam('DEBUG_BLE_DATA_PATH', 'True') 返回 OK", bret2 == "OK",
+           "setParam 返回 'OK'", f"setParam -> {bret2!r}")
 
-    # 3) 回放产生了有效数据（startTimeStamp 非 None）
-    has_anchor = replay.first_ts is not None
-    record(results, "回放数据有 startTimeStamp（流锚点）", has_anchor,
-           "replay.first_ts is not None",
-           f"replay.first_ts={replay.first_ts} live.first_ts={live.first_ts}")
+    # 注册回调，追踪回放拒绝前后的数据量
+    class Stage2Counter:
+        def __init__(self):
+            self.count = 0
+        def __call__(self, sensor, data):
+            items = data if isinstance(data, list) else [data]
+            self.count += len(items)
+    counter = Stage2Counter()
+    sensor.onDataCallback = counter
 
-    # 4) informational：per-DataType 批数差异
-    all_dts = sorted(live_dts | replay_dts)
-    diffs = []
-    for dt in all_dts:
-        lc = live.dt_counts.get(dt, 0)
-        rc = replay.dt_counts.get(dt, 0)
-        diffs.append(f"{dt}: live={lc} replay={rc} diff={rc - lc}")
-    print(f"  [informational] 各 DataType 批数差异: {' | '.join(diffs)}", flush=True)
-    record(results, "per-DataType 批数差异（informational）", None,
-           "仅作参考，不做 PASS/FAIL 判定", diffs)
+    print("\n[起流] SensorProfile.startDataNotification() ...", flush=True)
+    try:
+        sret = sensor.startDataNotification()
+        start2_txt = f"返回 {sret}"
+    except Exception as e:
+        sret = None
+        start2_txt = f"抛异常 {type(e).__name__}: {e}"
+    print(f"[起流] startDataNotification() -> {start2_txt}", flush=True)
+    record(results, "阶段2 startDataNotification 返回 True", sret is True,
+           "startDataNotification() 返回 True", f"startDataNotification() -> {start2_txt}")
 
-    # 5) informational：全速回放（耗时远小于录制时长）
-    if live_duration > 0:
-        speedup = live_duration / replay_duration if replay_duration > 0 else float('inf')
-        print(f"  [informational] 全速回放: 录制={live_duration:.3f}s 回放={replay_duration:.3f}s 加速比={speedup:.1f}x", flush=True)
-        record(results, "realtime=False 全速回放（informational）", None,
-               "回放耗时远小于录制时长",
-               f"replay={replay_duration:.3f}s live={live_duration:.3f}s 加速比={speedup:.1f}x")
+    streaming = sensor.isDataTransfering
+    print(f"[起流] isDataTransfering = {streaming}", flush=True)
+    record(results, "起流后 isDataTransfering == True", streaming is True,
+           "isDataTransfering == True", f"isDataTransfering == {streaming}")
+
+    # 等待数据开始流动，记录回放前的数据量和时间
+    time.sleep(1)
+    before_replay_count = counter.count
+    before_replay_ts = time.time()
+    print(f"[回放前] 数据批数 = {before_replay_count}，时间戳 = {before_replay_ts:.0f}", flush=True)
+
+    # ---- 核心断言 1：起流中调回放应被拒绝 ----
+    print(f"\n[回放] 起流中尝试 replayBinFile({bin_path!r}, sensor, realtime=True) ...", flush=True)
+    replay_result = None
+    replay_error = None
+    try:
+        replay_result = ctrl.replayBinFile(bin_path, sensor, realtime=True)
+    except Exception as e:
+        replay_error = f"{type(e).__name__}: {e}"
+
+    rejected = (replay_result is None) or (replay_error is not None)
+    print(f"[回放] 返回={replay_result!r}  异常={replay_error}", flush=True)
+    record(results, "起流中回放被拒绝（返回 None 或抛异常）", rejected,
+           "replayBinFile 返回 None 或抛异常",
+           f"返回={replay_result!r} 异常={replay_error}")
+
+    # ---- 核心断言 2：回放被拒绝后，录制继续（数据仍在增长）----
+    print(f"\n[回放后] 继续采集 {COLLECT_SECONDS}s，验证录制仍在继续 ...", flush=True)
+    time.sleep(COLLECT_SECONDS)
+    after_replay_count = counter.count
+    after_replay_ts = time.time()
+    growth = after_replay_count - before_replay_count
+    print(f"[回放后] 数据批数 = {after_replay_count}（增长 {growth}）", flush=True)
+    record(results, "回放被拒绝后数据仍在增长（录制继续）", growth > 0,
+           "回放后采集数据批数 > 回放前", f"增长 {growth}")
+
+    # 停止录制
+    try:
+        sensor.stopDataNotification()
+    except Exception as e:
+        print(f"[停流] stopDataNotification 抛异常 {type(e).__name__}: {e}", flush=True)
+
+    ble_path2 = _get_ble_path(sensor)
+    print(f"[bin] stop 后 getParam('DEBUG_BLE_DATA_PATH') = {ble_path2!r}", flush=True)
+
+    try:
+        sensor.disconnect()
+    except Exception as e:
+        print(f"[断开] disconnect 抛异常 {type(e).__name__}: {e}", flush=True)
+
+    if not isinstance(ble_path2, str) or not ble_path2.strip():
+        ble_path2 = _get_ble_path(sensor)
+        print(f"[bin] disconnect 后 getParam('DEBUG_BLE_DATA_PATH') = {ble_path2!r}", flush=True)
+
+    time.sleep(0.5)
+
+    bins_after2 = _list_bins(log_dir)
+    new_bins2 = sorted(set(bins_after2.keys()) - set(bins_before.keys()) - set(new_bins))
+    print(f"\n[检查] 阶段2 新增 .bin 文件: {new_bins2 if new_bins2 else '无'}", flush=True)
+
+    bin_path2 = ble_path2 if (isinstance(ble_path2, str) and ble_path2.strip()) else None
+    if bin_path2 is None and new_bins2:
+        bin_path2 = bins_after2[new_bins2[0]]
+
+    have_bin2 = bool(bin_path2) and os.path.isfile(bin_path2)
+    print(f"[检查] 阶段2 bin 路径: {bin_path2!r}，文件存在={have_bin2}", flush=True)
+
+    # ---- 核心断言 3：bin 时长覆盖了回放拒绝后的时间 ----
+    if have_bin2:
+        try:
+            info = ctrl.getBinFileInfo(bin_path2)
+        except Exception as e:
+            info = None
+            print(f"[bin] getBinFileInfo 抛异常 {type(e).__name__}: {e}", flush=True)
+        if isinstance(info, dict):
+            duration = info.get("replay_duration", 0)
+            streaming_duration = after_replay_ts - before_replay_ts
+            print(f"[bin] 阶段2 bin replay_duration = {duration:.3f}s，回放前→回放后+采集 = {streaming_duration:.1f}s", flush=True)
+            # bin 时长应覆盖回放前到停止的完整时段（至少 ≥ 回放后采集时长）
+            duration_ok = isinstance(duration, (int, float)) and duration >= streaming_duration
+            record(results, "bin 时长覆盖回放拒绝后的录制时段", duration_ok,
+                   f"bin replay_duration >= {streaming_duration:.1f}s",
+                   f"replay_duration={duration:.3f}s")
+        else:
+            record(results, "bin 时长覆盖回放拒绝后的录制时段", None,
+                   "getBinFileInfo 返回有效 dict", "getBinFileInfo 返回 None 或非 dict")
+    else:
+        record(results, "bin 时长覆盖回放拒绝后的录制时段", None,
+               "阶段2 生成有效 bin", "无阶段2 bin")
 
     # 清理
     try:

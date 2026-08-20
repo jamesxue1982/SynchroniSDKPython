@@ -1,29 +1,33 @@
 # -*- coding: utf-8 -*-
-"""BIN-FUNC-001：连接后自动生成 .bin。
+"""BIN-ROB-001：磁盘不足时跳过/停止录制。
 
-对应用例：06_Bin录制回放解析.md -> BIN-FUNC-001
-可自动化：auto（设备上电、在范围内为运行前置；测试中无需人工动作）
+对应用例：06_Bin录制回放解析.md -> BIN-ROB-001
+可自动化：auto（通过文件系统权限模拟写盘失败，无需实际磁盘不足）
 
 流程：
-  1) setLogPath(True, 受控目录) + setDebugEnabled(True) 指向临时日志目录
+  1) setLogPath(True, 受控目录) + setDebugEnabled(True)
   2) scan -> requireSensor -> connect -> 到达 Ready -> init
-  3) setParam("DEBUG_BLE_DATA_PATH", True) 开启 bin 导出（关键：默认不导出）
-  4) startDataNotification 起流，采集数秒后 stopDataNotification、disconnect
-  5) 通过 getParam("DEBUG_BLE_DATA_PATH") 读导出的 bin 路径（回退到目录扫描）
-  6) 校验：bin 路径非空、文件存在、文件名符合 *.bin 且含时间戳
+  3) setParam("DEBUG_BLE_DATA_PATH", "True") 开启 bin 导出
+  4) 将日志目录设为只读（icacls /deny 当前用户写权限），模拟写盘失败
+  5) 注册 onDataCallback 计数，startDataNotification 起流，采集 N 秒
+  6) 校验：实时流正常（onDataCallback 收到数据），SDK 不崩溃
+  7) stopDataNotification + disconnect
+  8) 校验：日志目录无新增 .bin 文件（写盘失败时 SDK 跳过/停止录制）
+  9) 恢复目录权限，清理
 
 说明：
-  startDataNotification 是"开始数据流（通知）"，不是"开始录制"。bin 录制没有独立的
-  start/stop 接口：连接后 SDK 持续把原始 BLE 包写入临时文件，在 stopDataNotification /
-  disconnect 时，只有当 DEBUG_BLE_DATA_PATH 被设为 True（或路径）才导出为 .bin 文件；
-  未设置（默认）时临时文件会被删除，因此不会产生 .bin。
-  导出文件名（README + 示例印证）：DEBUG_BLE_DATA_PATH=True 时为
-  {DeviceName}_data_YYYYMMDD_HHMMSS.bin，落盘到 SDK 日志目录。
-  本用例只验证"生成 bin 文件 + 命名格式"，不读 bin 内容（元数据校验见 FUNC-002）。
+  SDK 的 bin 录制在 C++ 层完成，Python 层 mock 无法拦截。
+  通过 Windows icacls 将日志目录设为当前用户只读，SDK 写 bin 文件时
+  会触发写错误，等效于"写盘异常"场景。
+  验证要点：
+    - 不崩溃（SDK 进程正常，无异常退出）
+    - 实时流继续（onDataCallback 仍收到数据）
+    - bin 未生成（写盘失败时跳过录制）
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
   - 待测设备：OYWW1100 上电、在范围内
+  - 需要管理员权限（icacls 修改目录权限）
 """
 
 import os
@@ -31,6 +35,8 @@ import re
 import sys
 import time
 import tempfile
+import subprocess
+import getpass
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUTOMATION_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
@@ -41,12 +47,7 @@ import config
 import common
 from common import record, _identity_of, match_target
 
-COLLECT_SECONDS = 3  # 起流后采集时长（秒），足以确保会话有数据并落盘
-
-
-def _base_name(name):
-    """去掉广播名里的 (XXXX) 尾巴，得到设备基础名（如 OYWW1100(80F3) -> OYWW1100）。"""
-    return re.sub(r"\([0-9A-Fa-f]{4}\)\s*$", "", (name or "")).strip()
+COLLECT_SECONDS = 5  # 起流采集时长（秒）
 
 
 def _list_bins(log_dir):
@@ -62,19 +63,57 @@ def _list_bins(log_dir):
     return out
 
 
-def _get_ble_path(sensor):
+def _deny_write(dir_path):
+    """将目录设为当前用户只读。返回 (ok, detail)。"""
+    username = getpass.getuser()
     try:
-        v = sensor.getParam("DEBUG_BLE_DATA_PATH")
+        subprocess.run(
+            ["icacls", dir_path, "/deny", f"{username}:(W)"],
+            capture_output=True, text=True, check=True, timeout=10,
+        )
+        return True, f"已对 {username} 拒绝写权限"
+    except subprocess.CalledProcessError as e:
+        return False, f"icacls /deny 失败: {e.stderr.strip() if e.stderr else str(e)}"
+    except FileNotFoundError:
+        return False, "icacls 命令不可用"
     except Exception as e:
-        return f"抛异常 {type(e).__name__}: {e}"
-    return v
+        return False, f"拒绝写权限异常: {e}"
+
+
+def _restore_write(dir_path):
+    """恢复目录写权限。"""
+    username = getpass.getuser()
+    try:
+        subprocess.run(
+            ["icacls", dir_path, "/remove", username],
+            capture_output=True, text=True, check=True, timeout=10,
+        )
+        return True
+    except Exception:
+        pass
+    return False
+
+
+def _on_error(sensor, reason):
+    print(f"[onErrorCallback] {getattr(sensor, 'BLEDevice', None)}: {reason}", flush=True)
+
+
+class LiveCounter:
+    """简单计数回调：验证实时流是否正常产生数据。"""
+
+    def __init__(self):
+        self.count = 0
+
+    def __call__(self, sensor, data):
+        items = data if isinstance(data, list) else [data]
+        self.count += len(items)
 
 
 def main():
     ctrl = SensorControllerInstance
 
     print("=" * 60, flush=True)
-    print("BIN-FUNC-001 连接后自动生成 .bin", flush=True)
+    print("BIN-ROB-001 磁盘不足时跳过/停止录制", flush=True)
     print("=" * 60, flush=True)
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
@@ -82,14 +121,14 @@ def main():
     print("\n[前置条件]", flush=True)
     print("  - 主机(电脑)：蓝牙已开启", flush=True)
     print("  - 待测设备：OYWW1100 上电、在范围内", flush=True)
+    print("  - 需要管理员权限（icacls 修改目录权限）", flush=True)
 
     input("\n>>> [人工操作] 请确认待测设备 OYWW1100 已【开机】且在范围内，"
           "测试过程无需额外动作，完成后按回车继续 ...")
 
     results = []
 
-    # 受控日志目录：让 bin 导出落到可定位的临时目录
-    log_dir = tempfile.mkdtemp(prefix="sdklog_bin_")
+    log_dir = tempfile.mkdtemp(prefix="sdklog_rob_")
     print(f"\n[日志目录] 使用受控目录 {log_dir}", flush=True)
     try:
         ctrl.setLogPath(True, log_dir)
@@ -145,9 +184,6 @@ def main():
     print(f"[扫描] 目标设备: {name} {addr}", flush=True)
     record(results, "scan 匹配到目标设备", True, "scan 返回含目标设备", f"匹配到 {name} {addr}")
 
-    base_name = _base_name(name)
-    identity = _identity_of(name)
-
     # requireSensor
     sensor = ctrl.requireSensor(target)
     if sensor is None:
@@ -158,6 +194,8 @@ def main():
         return
     record(results, "requireSensor 返回 SensorProfile", isinstance(sensor, SensorProfile),
            "返回 SensorProfile", f"返回 {type(sensor).__name__}")
+
+    sensor.onErrorCallback = _on_error
 
     # connect
     print("\n[连接] SensorProfile.connect() ...", flush=True)
@@ -199,17 +237,41 @@ def main():
     print(f"[init] SensorProfile.init() -> {init_txt}", flush=True)
     record(results, "SensorProfile.init 返回 True", iret is True, "init() 返回 True", f"init() -> {init_txt}")
 
-    # 开启 bin 导出（关键步骤：默认不导出，未开启则 stop/disconnect 后临时文件被删除）
-    print("\n[bin] setParam('DEBUG_BLE_DATA_PATH', True) ...", flush=True)
+    # 开启 bin 导出
+    print("\n[bin] setParam('DEBUG_BLE_DATA_PATH', 'True') ...", flush=True)
     try:
         bret = sensor.setParam("DEBUG_BLE_DATA_PATH", "True")
     except Exception as e:
         bret = f"抛异常 {type(e).__name__}: {e}"
-    print(f"[bin] setParam('DEBUG_BLE_DATA_PATH', True) -> {bret!r}", flush=True)
-    record(results, "setParam('DEBUG_BLE_DATA_PATH', True) 返回 OK", bret == "OK",
+    print(f"[bin] setParam('DEBUG_BLE_DATA_PATH', 'True') -> {bret!r}", flush=True)
+    record(results, "setParam('DEBUG_BLE_DATA_PATH', 'True') 返回 OK", bret == "OK",
            "setParam 返回 'OK'", f"setParam -> {bret!r}")
 
-    # 起流
+    # ---- 模拟写盘失败：将日志目录设为只读 ----
+    print(f"\n[模拟] 将日志目录设为只读（模拟写盘失败）...", flush=True)
+    deny_ok, deny_detail = _deny_write(log_dir)
+    print(f"[模拟] {deny_detail}", flush=True)
+    record(results, "日志目录设为只读（模拟写盘失败）", deny_ok,
+           "icacls /deny 成功", deny_detail)
+
+    if not deny_ok:
+        print("[FAIL] 无法模拟写盘失败，跳过后续测试", flush=True)
+        try:
+            sensor.disconnect()
+        except Exception:
+            pass
+        try:
+            ctrl.setDebugEnabled(False)
+        except Exception:
+            pass
+        ctrl.terminate()
+        print("\n结论: FAIL", flush=True)
+        return
+
+    # ---- 起流采集 ----
+    live = LiveCounter()
+    sensor.onDataCallback = live
+
     print("\n[起流] SensorProfile.startDataNotification() ...", flush=True)
     try:
         sret = sensor.startDataNotification()
@@ -221,72 +283,48 @@ def main():
     record(results, "SensorProfile.startDataNotification 返回 True", sret is True,
            "startDataNotification() 返回 True", f"startDataNotification() -> {start_txt}")
 
-    print(f"\n[采集] 等待 {COLLECT_SECONDS}s 让数据流产生并录制 ...", flush=True)
+    print(f"\n[采集] 等待 {COLLECT_SECONDS}s（写盘应失败，但实时流应继续）...", flush=True)
     time.sleep(COLLECT_SECONDS)
 
-    # 停流（触发 bin 导出到 SDK 日志目录）
+    # 校验 1：实时流正常（收到数据）
+    has_data = live.count > 0
+    record(results, "写盘失败时实时流继续（onDataCallback 收到数据）", has_data,
+           "onDataCallback 收到数据（count > 0）", f"live.count={live.count}")
+
+    # 校验 2：SDK 不崩溃（进程存活，能正常执行 stopDataNotification）
+    print("\n[停流] SensorProfile.stopDataNotification() ...", flush=True)
+    crash = False
     try:
         sensor.stopDataNotification()
+        stop_txt = "无异常"
     except Exception as e:
-        print(f"[停流] stopDataNotification 抛异常 {type(e).__name__}: {e}", flush=True)
+        stop_txt = f"抛异常 {type(e).__name__}: {e}"
+        crash = True
+    print(f"[停流] stopDataNotification -> {stop_txt}", flush=True)
+    record(results, "写盘失败时 SDK 不崩溃（stopDataNotification 正常）", not crash,
+           "stopDataNotification 无异常", stop_txt)
 
-    ble_path = _get_ble_path(sensor)
-    print(f"[bin] stop 后 getParam('DEBUG_BLE_DATA_PATH') = {ble_path!r}", flush=True)
-
-    # 断开（若 stop 未导出，disconnect 时也会导出）
+    # disconnect
     try:
         sensor.disconnect()
     except Exception as e:
         print(f"[断开] SensorProfile.disconnect 抛异常 {type(e).__name__}: {e}", flush=True)
 
-    if not isinstance(ble_path, str) or not ble_path.strip():
-        ble_path = _get_ble_path(sensor)
-        print(f"[bin] disconnect 后 getParam('DEBUG_BLE_DATA_PATH') = {ble_path!r}", flush=True)
-
-    # 给文件系统收尾留一点时间
     time.sleep(0.5)
 
-    # 以 getParam 返回路径为主；为空则回退到目录扫描
+    # 校验 3：bin 未生成（写盘失败时跳过录制）
     bins_after = _list_bins(log_dir)
     new_bins = sorted(set(bins_after.keys()) - set(bins_before.keys()))
-    print(f"\n[检查] 日志目录 {log_dir}", flush=True)
-    print(f"[检查] 新增 .bin 文件: {new_bins if new_bins else '无'}", flush=True)
+    no_bin = len(new_bins) == 0
+    print(f"\n[检查] 新增 .bin 文件: {new_bins if new_bins else '无'}", flush=True)
+    record(results, "写盘失败时跳过录制（无新增 .bin）", no_bin,
+           "日志目录无新增 .bin 文件", f"新增 {len(new_bins)} 个 .bin: {new_bins}" if new_bins else "无新增 .bin")
 
-    bin_path = ble_path if (isinstance(ble_path, str) and ble_path.strip()) else None
-    if bin_path is None and new_bins:
-        bin_path = bins_after[new_bins[0]]
+    # ---- 恢复权限并清理 ----
+    print(f"\n[清理] 恢复目录写权限 ...", flush=True)
+    restored = _restore_write(log_dir)
+    print(f"[清理] 权限恢复: {'成功' if restored else '失败（需手动处理）'}", flush=True)
 
-    # 1) 生成了 bin（路径非空且文件存在）
-    if bin_path:
-        exists = os.path.isfile(bin_path)
-        generated = exists
-        actual_txt = f"{bin_path}（存在={exists}）"
-    else:
-        generated = False
-        actual_txt = f"未取得 bin 路径；目录新增 {new_bins}"
-    print(f"[检查] bin 路径: {bin_path!r}，文件存在={generated}", flush=True)
-    record(results, "连接起流后生成 .bin", generated,
-           "DEBUG_BLE_DATA_PATH=True 且 getParam 返回的路径文件存在",
-           actual_txt)
-
-    # 2) 文件名符合约定（含时间戳 + 设备名/_data_ 之一）
-    ts_pat = re.compile(r"\d{8}_\d{6}")
-    naming_ok = False
-    naming_actual = actual_txt
-    if bin_path:
-        fname = os.path.basename(bin_path)
-        has_ts = bool(ts_pat.search(fname))
-        has_name = bool(base_name and base_name in fname) or bool(identity and identity in fname)
-        has_data = "_data_" in fname
-        naming_ok = has_ts and (has_name or has_data)
-        naming_actual = fname
-        print(f"[检查] 文件名: {fname}（含时间戳={has_ts}, 含设备名/identity={has_name}, 含_data_={has_data}）", flush=True)
-
-    record(results, "bin 文件名符合约定", naming_ok,
-           "文件名含 YYYYMMDD_HHMMSS 时间戳，且含设备名(或 identity 或 _data_)",
-           naming_actual)
-
-    # 清理：关闭导出与调试日志，避免遗留
     try:
         sensor.setParam("DEBUG_BLE_DATA_PATH", "False")
     except Exception:
@@ -315,7 +353,10 @@ def main():
         if status == "FAIL":
             all_pass = False
 
-    print(f"\n[提示] 本次 bin 落盘目录: {log_dir}", flush=True)
+    print(f"\n[提示] 日志目录: {log_dir}", flush=True)
+    if not restored:
+        print(f"[警告] 目录权限未恢复，请手动执行: icacls \"{log_dir}\" /remove {getpass.getuser()}", flush=True)
+
     print("\n结论: " + ("PASS" if all_pass else "FAIL"), flush=True)
 
 

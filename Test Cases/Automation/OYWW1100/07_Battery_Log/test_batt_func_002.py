@@ -1,26 +1,20 @@
 # -*- coding: utf-8 -*-
-"""BIN-BND-001：默认不设 DEBUG_BLE_DATA_PATH 时不持久落盘 + 临时文件生命周期观察。
+"""BATT-FUNC-002：onPowerChanged 上报 0~100，±2% 滞回，不报 -1。
 
-对应用例：06_Bin录制回放解析.md -> BIN-BND-001
-可自动化：auto（设备上电、在范围内为运行前置；临时文件观察为 best-effort/informational）
+对应用例：07_电量日志调试.md -> BATT-FUNC-002
+可自动化：auto（起流后观察电量变化，无需人工动作）
 
 流程：
-  1) setLogPath(True, 受控目录) + setDebugEnabled(True)
-  2) scan -> requireSensor -> connect -> 到达 Ready -> init
-     （关键：本用例【不】调用 setParam("DEBUG_BLE_DATA_PATH", ...)）
-  3) startDataNotification 起流，采集数秒
-  4) 起流期间观察系统临时目录（%TEMP%）中 mtime 晚于会话起点的疑似临时文件
-  5) stopDataNotification、disconnect
-  6) 硬断言：受控日志目录中不新增 .bin（默认不持久落盘）
-  7) best-effort 观察：起流期间出现的疑似临时文件在断开后是否消失
+  1) scan -> requireSensor -> connect -> 到达 Ready -> init
+  2) 注册 onPowerChanged 回调，记录每次上报的 level
+  3) startDataNotification 起流（负载下电量变化更明显）
+  4) 每 20 秒检查一次电量值，若与初始值不同则立即停止，判定 PASS
+  5) 最多观察 10 分钟，若全程无变化则记录为"观察窗口内电量未变化"
 
 说明：
-  README：会话的原始 BLE 捕获先写进系统临时目录，stop/disconnect 时只有当
-  DEBUG_BLE_DATA_PATH 为 True（或路径）才导出为 .bin；为 False/""（默认未设）时
-  临时文件被直接删除。因此默认场景下不应在日志目录留下持久 .bin。
-  本用例的"临时文件短暂存在后删除"为 best-effort 观察：README 未文档化临时文件的
-  确切文件名/位置，且系统临时目录为共享目录，故该观察只作 informational 输出，
-  不作为 PASS/FAIL 硬门槛；硬门槛仅"日志目录不新增 .bin"。
+  通过起流增加设备负载，提高电量变化的概率。
+  电量变化即判 PASS（验证 onPowerChanged 回调能正确上报变化）。
+  若 10 分钟无变化，不判 FAIL（设备可能满电或充电中），仅记录。
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
@@ -28,10 +22,9 @@
 """
 
 import os
-import re
 import sys
 import time
-import tempfile
+import threading
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUTOMATION_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
@@ -42,55 +35,15 @@ import config
 import common
 from common import record, _identity_of, match_target
 
-COLLECT_SECONDS = 3  # 起流后采集时长（秒）
-
-
-def _base_name(name):
-    """去掉广播名里的 (XXXX) 尾巴，得到设备基础名（如 OYWW1100(80F3) -> OYWW1100）。"""
-    return re.sub(r"\([0-9A-Fa-f]{4}\)\s*$", "", (name or "")).strip()
-
-
-def _list_bins(log_dir):
-    if not log_dir or not os.path.isdir(log_dir):
-        return {}
-    out = {}
-    try:
-        for fn in os.listdir(log_dir):
-            if fn.lower().endswith(".bin"):
-                out[fn] = os.path.join(log_dir, fn)
-    except OSError:
-        pass
-    return out
-
-
-def _scan_temp(since, keywords):
-    """扫描系统临时目录，返回 mtime>=since 且文件名命中任一 keyword 的文件路径。"""
-    tmp = tempfile.gettempdir()
-    kws = [k for k in keywords if k]
-    out = []
-    try:
-        for fn in os.listdir(tmp):
-            full = os.path.join(tmp, fn)
-            try:
-                if not os.path.isfile(full):
-                    continue
-                if os.path.getmtime(full) < since:
-                    continue
-                if kws and not any(k.lower() in fn.lower() for k in kws):
-                    continue
-                out.append(full)
-            except OSError:
-                continue
-    except OSError:
-        pass
-    return out
+CHECK_INTERVAL = 20      # 每 20 秒检查一次电量
+MAX_OBSERVE_SECONDS = 600  # 最多观察 10 分钟
 
 
 def main():
     ctrl = SensorControllerInstance
 
     print("=" * 60, flush=True)
-    print("BIN-BND-001 默认不设 DEBUG_BLE_DATA_PATH 时不落盘 + 临时文件观察", flush=True)
+    print("BATT-FUNC-002 onPowerChanged 上报 0~100，±2% 滞回，不报 -1", flush=True)
     print("=" * 60, flush=True)
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
@@ -103,28 +56,6 @@ def main():
           "测试过程无需额外动作，完成后按回车继续 ...")
 
     results = []
-
-    # 受控日志目录：验证默认不在此落盘
-    log_dir = tempfile.mkdtemp(prefix="sdklog_bin_neg_")
-    print(f"\n[日志目录] 使用受控目录 {log_dir}", flush=True)
-    try:
-        ctrl.setLogPath(True, log_dir)
-        log_ok = True
-        log_txt = f"setLogPath(True, {log_dir}) 无异常"
-    except Exception as e:
-        log_ok = False
-        log_txt = f"setLogPath 抛异常 {type(e).__name__}: {e}"
-    print(f"[日志目录] {log_txt}", flush=True)
-    record(results, "setLogPath 设置受控日志目录", log_ok,
-           "setLogPath(True, dir) 无异常", log_txt)
-
-    try:
-        ctrl.setDebugEnabled(True)
-    except Exception as e:
-        print(f"[日志目录] setDebugEnabled(True) 抛异常 {type(e).__name__}: {e}", flush=True)
-
-    bins_before = _list_bins(log_dir)
-    session_start = time.time()  # 临时文件观察的起点
 
     # 环境检查
     is_enable = ctrl.isEnable
@@ -161,10 +92,6 @@ def main():
     addr = getattr(target, 'Address', '?')
     print(f"[扫描] 目标设备: {name} {addr}", flush=True)
     record(results, "scan 匹配到目标设备", True, "scan 返回含目标设备", f"匹配到 {name} {addr}")
-
-    base_name = _base_name(name)
-    identity = _identity_of(name)
-    keywords = [base_name, identity, ".bin"]
 
     # requireSensor
     sensor = ctrl.requireSensor(target)
@@ -206,7 +133,7 @@ def main():
         ctrl.terminate()
         return
 
-    # init（注意：本用例【不】调用 setParam("DEBUG_BLE_DATA_PATH", ...)）
+    # init
     print(f"\n[init] SensorProfile.init({config.PACKAGE_SAMPLE_COUNT}, {config.POWER_REFRESH_INTERVAL_MS}) ...", flush=True)
     try:
         iret = sensor.init(config.PACKAGE_SAMPLE_COUNT, config.POWER_REFRESH_INTERVAL_MS)
@@ -217,7 +144,26 @@ def main():
     print(f"[init] SensorProfile.init() -> {init_txt}", flush=True)
     record(results, "SensorProfile.init 返回 True", iret is True, "init() 返回 True", f"init() -> {init_txt}")
 
-    # 起流
+    # 注册 onPowerChanged 回调（线程安全）
+    power_records = []
+    lock = threading.Lock()
+    changed = threading.Event()  # 电量变化时触发
+    initial_level = [None]       # 用列表包装以便在闭包中修改
+    latest_level = [None]
+
+    def on_power_changed(sensor, level):
+        ts = time.time()
+        with lock:
+            power_records.append((ts, level))
+            if initial_level[0] is None:
+                initial_level[0] = level
+            latest_level[0] = level
+            if initial_level[0] is not None and level != initial_level[0]:
+                changed.set()
+
+    sensor.onPowerChanged = on_power_changed
+
+    # ---- 起流 ----
     print("\n[起流] SensorProfile.startDataNotification() ...", flush=True)
     try:
         sret = sensor.startDataNotification()
@@ -229,50 +175,114 @@ def main():
     record(results, "SensorProfile.startDataNotification 返回 True", sret is True,
            "startDataNotification() 返回 True", f"startDataNotification() -> {start_txt}")
 
-    # 起流期间观察系统临时目录
-    print(f"\n[采集] 等待 {COLLECT_SECONDS}s 让数据流产生并写临时文件 ...", flush=True)
-    time.sleep(COLLECT_SECONDS)
+    if sret is not True:
+        print("[FAIL] 起流失败，设备不可用，终止测试", flush=True)
+        try:
+            sensor.disconnect()
+        except Exception:
+            pass
+        print("\n结论: FAIL", flush=True)
+        ctrl.terminate()
+        return
 
-    during_temp = _scan_temp(session_start, keywords)
-    print(f"[观察] 起流期间系统临时目录疑似临时文件（mtime 晚于会话起点）: {during_temp if during_temp else '无'}", flush=True)
+    # ---- 循环观察：每 20 秒检查，最多 10 分钟 ----
+    print(f"\n[观察] 起流中，每 {CHECK_INTERVAL}s 检查电量变化，最多观察 {MAX_OBSERVE_SECONDS}s ...", flush=True)
+    start_time = time.time()
+    last_check_time = start_time
+    battery_changed = False
 
-    # 停流 + 断开
+    while time.time() - start_time < MAX_OBSERVE_SECONDS:
+        elapsed = time.time() - start_time
+        # 等待达到下一次检查间隔，同时监听 changed 事件
+        next_check = last_check_time + CHECK_INTERVAL
+        remaining = next_check - time.time()
+        if remaining > 0:
+            changed.wait(timeout=min(remaining, 5.0))  # 最多等 5s，避免长时间阻塞
+
+        # 检查是否已触发变化
+        if changed.is_set():
+            init_lv = initial_level[0]
+            cur_lv = latest_level[0]
+            print(f"\n[观察] 电量变化！ {init_lv} -> {cur_lv}（耗时 {elapsed:.0f}s）", flush=True)
+            battery_changed = True
+            break
+
+        # 到达检查间隔，输出当前状态
+        if time.time() >= next_check:
+            last_check_time = time.time()
+            with lock:
+                init_lv = initial_level[0]
+                cur_lv = latest_level[0]
+            print(f"  [检查] {elapsed:6.0f}s  初始电量={init_lv}  当前电量={cur_lv}", flush=True)
+
+    if not battery_changed:
+        elapsed = time.time() - start_time
+        print(f"\n[观察] {MAX_OBSERVE_SECONDS}s 观察窗口内电量未变化（初始={initial_level[0]}，最终={latest_level[0]}）", flush=True)
+
+    # 停流
     try:
         sensor.stopDataNotification()
     except Exception as e:
         print(f"[停流] stopDataNotification 抛异常 {type(e).__name__}: {e}", flush=True)
+
+    with lock:
+        records_copy = list(power_records)
+
+    print(f"\n[统计] 共收到 {len(records_copy)} 次 onPowerChanged 回调", flush=True)
+
+    # ---- 校验 1: 电量变化 ----
+    # 变化即 PASS；长时间无变化不判 FAIL（设备可能满电/充电中）
+    if battery_changed:
+        record(results, "onPowerChanged 上报电量变化", True,
+               f"起流后电量变化（初始={initial_level[0]}，最终={latest_level[0]}）",
+               f"变化耗时 {time.time() - start_time:.0f}s")
+    else:
+        record(results, "onPowerChanged 上报电量变化", None,
+               f"起流后电量变化（初始={initial_level[0]}，最终={latest_level[0]}）",
+               f"{MAX_OBSERVE_SECONDS}s 内电量未变化（设备可能满电或充电中）")
+
+    # ---- 校验 2: 值在 0~100 ----
+    if records_copy:
+        all_in_range = all(0 <= lv <= 100 for _, lv in records_copy)
+        no_neg_one = all(lv != -1 for _, lv in records_copy)
+        levels = [lv for _, lv in records_copy]
+        print(f"[校验] 上报值范围: {min(levels)}~{max(levels)}", flush=True)
+        print(f"[校验] 全部在 0~100: {all_in_range}", flush=True)
+        print(f"[校验] 全部不为 -1: {no_neg_one}", flush=True)
+    else:
+        all_in_range = False
+        no_neg_one = False
+        print("[校验] 未收到任何 onPowerChanged 回调", flush=True)
+
+    record(results, "onPowerChanged 上报值在 0~100", all_in_range,
+           "所有上报值在 0~100", f"共 {len(records_copy)} 次，全部在 0~100={all_in_range}")
+    record(results, "onPowerChanged 不报 -1", no_neg_one,
+           "所有上报值不为 -1", f"共 {len(records_copy)} 次，全部不为 -1={no_neg_one}")
+
+    # ---- 校验 3: ±2% 滞回（无 1% 抖动）----
+    if records_copy and len(records_copy) >= 2:
+        levels = [lv for _, lv in records_copy]
+        diff_by_one = []
+        for i in range(1, len(levels)):
+            if abs(levels[i] - levels[i - 1]) == 1:
+                diff_by_one.append((i, levels[i - 1], levels[i]))
+        hysteresis_ok = len(diff_by_one) == 0
+        hysteresis_txt = f"无 1% 抖动={hysteresis_ok}"
+        if diff_by_one:
+            hysteresis_txt += f"（发现 {len(diff_by_one)} 处相邻差 1: {diff_by_one[:5]}）"
+        print(f"[校验] ±2% 滞回（无 1% 抖动）: {hysteresis_ok}", flush=True)
+    else:
+        hysteresis_ok = False
+        hysteresis_txt = f"回调次数不足（{len(records_copy)}），无法判断滞回"
+
+    record(results, "onPowerChanged ±2% 滞回（无 1% 抖动）", hysteresis_ok,
+           "无连续回调值相差恰好 1", hysteresis_txt)
+
+    # 断开
     try:
         sensor.disconnect()
     except Exception as e:
         print(f"[断开] SensorProfile.disconnect 抛异常 {type(e).__name__}: {e}", flush=True)
-
-    time.sleep(0.5)
-
-    # 硬断言：受控日志目录不新增 .bin
-    bins_after = _list_bins(log_dir)
-    new_bins = sorted(set(bins_after.keys()) - set(bins_before.keys()))
-    print(f"\n[检查] 日志目录 {log_dir}", flush=True)
-    print(f"[检查] 新增 .bin 文件: {new_bins if new_bins else '无'}", flush=True)
-
-    no_persist = len(new_bins) == 0
-    record(results, "默认不设 DEBUG_BLE_DATA_PATH 时不持久落盘", no_persist,
-           "受控日志目录中不新增 .bin",
-           f"新增 {len(new_bins)} 个：{new_bins}")
-
-    # best-effort 观察：疑似临时文件在断开后是否消失
-    gone = [p for p in during_temp if not os.path.isfile(p)]
-    remain = [p for p in during_temp if os.path.isfile(p)]
-    print(f"[观察] 断开后消失: {gone if gone else '无'}", flush=True)
-    print(f"[观察] 断开后仍存在: {remain if remain else '无'}", flush=True)
-    record(results, "临时文件生命周期观察（best-effort/informational）", None,
-           "起流期间出现的疑似临时文件在断开后消失",
-           f"起流期间={during_temp} 断开后消失={gone} 仍存在={remain}")
-
-    # 清理
-    try:
-        ctrl.setDebugEnabled(False)
-    except Exception:
-        pass
 
     ctrl.terminate()
 
@@ -293,7 +303,6 @@ def main():
         if status == "FAIL":
             all_pass = False
 
-    print(f"\n[提示] 本次日志目录: {log_dir}", flush=True)
     print("\n结论: " + ("PASS" if all_pass else "FAIL"), flush=True)
 
 

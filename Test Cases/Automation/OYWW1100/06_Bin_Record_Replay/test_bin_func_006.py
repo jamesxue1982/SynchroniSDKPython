@@ -140,12 +140,19 @@ def main():
         ctrl.terminate()
         return
 
-    print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
+    print(f"\n[扫描] 目标 identity: {common.TARGET_IDENTITIES}", flush=True)
+    print(f"[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
     try:
         devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
     except Exception as e:
         devices = None
         print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
+    print(f"[扫描] 扫描到 {len(devices) if devices else 0} 台设备:", flush=True)
+    if devices:
+        for d in devices:
+            n = getattr(d, 'Name', '?')
+            a = getattr(d, 'Address', '?')
+            print(f"  {n} {a} identity={_identity_of(n)}", flush=True)
     target = match_target(devices)
 
     if target is None:
@@ -299,10 +306,15 @@ def main():
     t = threading.Thread(target=replay_thread, daemon=True)
     t.start()
 
-    # 等待数据开始流动
-    time.sleep(1)
-    before_pause = counter.snapshot()
-    print(f"[回放] 当前批数 = {before_pause}", flush=True)
+    # 等待数据开始流动（轮询，最多等 5s）
+    t_wait = time.time()
+    before_pause = 0
+    while time.time() - t_wait < 5:
+        before_pause = counter.snapshot()
+        if before_pause > 0:
+            break
+        time.sleep(0.2)
+    print(f"[回放] 当前批数 = {before_pause}（等待数据流动耗时 {time.time() - t_wait:.1f}s）", flush=True)
     record(results, "回放开始产生数据", before_pause > 0,
            "进入回放后 count > 0", f"before_pause={before_pause}")
 

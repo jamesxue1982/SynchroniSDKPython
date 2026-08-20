@@ -1,25 +1,22 @@
 # -*- coding: utf-8 -*-
-"""BIN-FUNC-001：连接后自动生成 .bin。
+"""LOG-FUNC-005：log(msg, level) 写入应用日志。
 
-对应用例：06_Bin录制回放解析.md -> BIN-FUNC-001
+对应用例：07_Battery_Log.md -> LOG-FUNC-005
 可自动化：auto（设备上电、在范围内为运行前置；测试中无需人工动作）
 
 流程：
   1) setLogPath(True, 受控目录) + setDebugEnabled(True) 指向临时日志目录
-  2) scan -> requireSensor -> connect -> 到达 Ready -> init
-  3) setParam("DEBUG_BLE_DATA_PATH", True) 开启 bin 导出（关键：默认不导出）
-  4) startDataNotification 起流，采集数秒后 stopDataNotification、disconnect
-  5) 通过 getParam("DEBUG_BLE_DATA_PATH") 读导出的 bin 路径（回退到目录扫描）
-  6) 校验：bin 路径非空、文件存在、文件名符合 *.bin 且含时间戳
+  2) 测试 controller 级别：ctrl.log("test_controller_msg", "I") 写入一条 Info 日志
+  3) scan -> requireSensor -> connect -> 到达 Ready -> init
+  4) 测试 profile 级别：sensor.log("test_profile_msg", "W") 写入一条 Warning 日志
+  5) 测试：profile 未启用时，sensor.log 应回退到 controller log
+  6) 读取日志文件，检查 [App] 标记和测试消息的内容及级别（D/I/W/E）
 
 说明：
-  startDataNotification 是"开始数据流（通知）"，不是"开始录制"。bin 录制没有独立的
-  start/stop 接口：连接后 SDK 持续把原始 BLE 包写入临时文件，在 stopDataNotification /
-  disconnect 时，只有当 DEBUG_BLE_DATA_PATH 被设为 True（或路径）才导出为 .bin 文件；
-  未设置（默认）时临时文件会被删除，因此不会产生 .bin。
-  导出文件名（README + 示例印证）：DEBUG_BLE_DATA_PATH=True 时为
-  {DeviceName}_data_YYYYMMDD_HHMMSS.bin，落盘到 SDK 日志目录。
-  本用例只验证"生成 bin 文件 + 命名格式"，不读 bin 内容（元数据校验见 FUNC-002）。
+  SDK 提供 log(msg, level) 接口允许应用层将自定义消息写入日志。
+  level 支持 D(debug)、I(info)、W(warning)、E(error) 四个级别。
+  SensorController.log 写入 controller 级别日志，SensorProfile.log 写入 profile 级别日志。
+  当 profile 日志未启用时，SensorProfile.log 应回退到 controller 日志。
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
@@ -41,40 +38,53 @@ import config
 import common
 from common import record, _identity_of, match_target
 
-COLLECT_SECONDS = 3  # 起流后采集时长（秒），足以确保会话有数据并落盘
-
 
 def _base_name(name):
-    """去掉广播名里的 (XXXX) 尾巴，得到设备基础名（如 OYWW1100(80F3) -> OYWW1100）。"""
+    """去掉广播名里的 (XXXX) 尾巴，得到设备基础名。"""
     return re.sub(r"\([0-9A-Fa-f]{4}\)\s*$", "", (name or "")).strip()
 
 
-def _list_bins(log_dir):
+def _list_log_files(log_dir):
+    """列出日志目录中所有 .log 和 .txt 文件，返回 {filename: fullpath}。"""
     if not log_dir or not os.path.isdir(log_dir):
         return {}
     out = {}
     try:
         for fn in os.listdir(log_dir):
-            if fn.lower().endswith(".bin"):
+            if fn.lower().endswith((".log", ".txt")):
                 out[fn] = os.path.join(log_dir, fn)
     except OSError:
         pass
     return out
 
 
-def _get_ble_path(sensor):
-    try:
-        v = sensor.getParam("DEBUG_BLE_DATA_PATH")
-    except Exception as e:
-        return f"抛异常 {type(e).__name__}: {e}"
-    return v
+def _read_logs(log_dir):
+    """读取日志目录中所有日志文件内容，返回字符串列表。"""
+    lines = []
+    log_files = _list_log_files(log_dir)
+    for fn, fp in sorted(log_files.items()):
+        try:
+            with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                lines.extend(f.readlines())
+        except Exception:
+            pass
+    return lines
+
+
+def _search_log_lines(log_dir, pattern):
+    """在日志文件中搜索匹配 pattern 的行。"""
+    matches = []
+    for line in _read_logs(log_dir):
+        if re.search(pattern, line, re.IGNORECASE):
+            matches.append(line.strip())
+    return matches
 
 
 def main():
     ctrl = SensorControllerInstance
 
     print("=" * 60, flush=True)
-    print("BIN-FUNC-001 连接后自动生成 .bin", flush=True)
+    print("LOG-FUNC-005 log(msg, level) 写入应用日志", flush=True)
     print("=" * 60, flush=True)
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
@@ -88,8 +98,8 @@ def main():
 
     results = []
 
-    # 受控日志目录：让 bin 导出落到可定位的临时目录
-    log_dir = tempfile.mkdtemp(prefix="sdklog_bin_")
+    # 受控日志目录
+    log_dir = tempfile.mkdtemp(prefix="sdklog_")
     print(f"\n[日志目录] 使用受控目录 {log_dir}", flush=True)
     try:
         ctrl.setLogPath(True, log_dir)
@@ -107,14 +117,40 @@ def main():
     except Exception as e:
         print(f"[日志目录] setDebugEnabled(True) 抛异常 {type(e).__name__}: {e}", flush=True)
 
-    bins_before = _list_bins(log_dir)
+    # ---- 测试 1：SensorController.log 写入应用日志（controller 级别） ----
+    ctrl_test_msg = "test_controller_msg_ctrl_log_001"
+    print(f"\n[应用日志] ctrl.log('{ctrl_test_msg}', 'I') ...", flush=True)
+    try:
+        ctrl.log(ctrl_test_msg, "I")
+        ctrl_log_ok = True
+        ctrl_log_txt = f"ctrl.log('{ctrl_test_msg}', 'I') 无异常"
+    except Exception as e:
+        ctrl_log_ok = False
+        ctrl_log_txt = f"ctrl.log 抛异常 {type(e).__name__}: {e}"
+    print(f"[应用日志] {ctrl_log_txt}", flush=True)
+
+    # 给日志写入留时间
+    time.sleep(1.0)
+
+    # 搜索日志中的 controller 消息
+    ctrl_matches = _search_log_lines(log_dir, re.escape(ctrl_test_msg))
+    found_ctrl = len(ctrl_matches) > 0
+    print(f"[应用日志] 搜索 '{ctrl_test_msg}' 匹配到 {len(ctrl_matches)} 行:", flush=True)
+    for m in ctrl_matches[:5]:
+        print(f"  {m[:120]}", flush=True)
+    record(results, "SensorController.log 写入应用日志", found_ctrl,
+           f"ctrl.log('{ctrl_test_msg}', 'I') 后在日志中可找到该消息",
+           f"匹配到 {len(ctrl_matches)} 行" if found_ctrl else "未找到匹配行")
 
     # 环境检查
     is_enable = ctrl.isEnable
     print(f"\n[环境检查] SensorController.isEnable = {is_enable}", flush=True)
     if is_enable is not True:
         print("[跳过] 前置条件不满足：电脑蓝牙未开启。请先开启【电脑】蓝牙后重跑。", flush=True)
+        # 仍然继续汇总已有的结果
         ctrl.terminate()
+        all_pass = all(r[1] == "PASS" for r in results)
+        print("\n结论: " + ("PASS" if all_pass else "FAIL"), flush=True)
         return
 
     # 扫描匹配
@@ -199,98 +235,65 @@ def main():
     print(f"[init] SensorProfile.init() -> {init_txt}", flush=True)
     record(results, "SensorProfile.init 返回 True", iret is True, "init() 返回 True", f"init() -> {init_txt}")
 
-    # 开启 bin 导出（关键步骤：默认不导出，未开启则 stop/disconnect 后临时文件被删除）
-    print("\n[bin] setParam('DEBUG_BLE_DATA_PATH', True) ...", flush=True)
+    # ---- 测试 2：SensorProfile.log 写入应用日志（profile 级别） ----
+    profile_test_msg = "test_profile_msg_sensor_log_002"
+    print(f"\n[应用日志] sensor.log('{profile_test_msg}', 'W') ...", flush=True)
     try:
-        bret = sensor.setParam("DEBUG_BLE_DATA_PATH", "True")
+        sensor.log(profile_test_msg, "W")
+        sensor_log_ok = True
+        sensor_log_txt = f"sensor.log('{profile_test_msg}', 'W') 无异常"
     except Exception as e:
-        bret = f"抛异常 {type(e).__name__}: {e}"
-    print(f"[bin] setParam('DEBUG_BLE_DATA_PATH', True) -> {bret!r}", flush=True)
-    record(results, "setParam('DEBUG_BLE_DATA_PATH', True) 返回 OK", bret == "OK",
-           "setParam 返回 'OK'", f"setParam -> {bret!r}")
+        sensor_log_ok = False
+        sensor_log_txt = f"sensor.log 抛异常 {type(e).__name__}: {e}"
+    print(f"[应用日志] {sensor_log_txt}", flush=True)
 
-    # 起流
-    print("\n[起流] SensorProfile.startDataNotification() ...", flush=True)
+    # 给日志写入留时间
+    time.sleep(1.0)
+
+    # 搜索日志中的 profile 消息
+    profile_matches = _search_log_lines(log_dir, re.escape(profile_test_msg))
+    found_profile = len(profile_matches) > 0
+    print(f"[应用日志] 搜索 '{profile_test_msg}' 匹配到 {len(profile_matches)} 行:", flush=True)
+    for m in profile_matches[:5]:
+        print(f"  {m[:120]}", flush=True)
+    record(results, "SensorProfile.log 写入应用日志", found_profile,
+           f"sensor.log('{profile_test_msg}', 'W') 后在日志中可找到该消息",
+           f"匹配到 {len(profile_matches)} 行" if found_profile else "未找到匹配行")
+
+    # ---- 测试 3：profile 未启用时回退 controller log ----
+    # 此测试验证：当 profile 日志（DEBUG_LOG_PATH）未设置时，
+    # sensor.log 的内容应出现在 controller 日志中（回退行为）
+    fallback_msg = "test_fallback_msg_ctrl_log_003"
+    print(f"\n[应用日志] 回退测试: sensor.log('{fallback_msg}', 'D') ...", flush=True)
     try:
-        sret = sensor.startDataNotification()
-        start_txt = f"返回 {sret}"
+        sensor.log(fallback_msg, "D")
+        fallback_ok = True
+        fallback_txt = f"sensor.log('{fallback_msg}', 'D') 无异常"
     except Exception as e:
-        sret = None
-        start_txt = f"抛异常 {type(e).__name__}: {e}"
-    print(f"[起流] SensorProfile.startDataNotification() -> {start_txt}", flush=True)
-    record(results, "SensorProfile.startDataNotification 返回 True", sret is True,
-           "startDataNotification() 返回 True", f"startDataNotification() -> {start_txt}")
+        fallback_ok = False
+        fallback_txt = f"sensor.log 抛异常 {type(e).__name__}: {e}"
+    print(f"[应用日志] {fallback_txt}", flush=True)
 
-    print(f"\n[采集] 等待 {COLLECT_SECONDS}s 让数据流产生并录制 ...", flush=True)
-    time.sleep(COLLECT_SECONDS)
+    time.sleep(1.0)
 
-    # 停流（触发 bin 导出到 SDK 日志目录）
-    try:
-        sensor.stopDataNotification()
-    except Exception as e:
-        print(f"[停流] stopDataNotification 抛异常 {type(e).__name__}: {e}", flush=True)
+    fallback_matches = _search_log_lines(log_dir, re.escape(fallback_msg))
+    found_fallback = len(fallback_matches) > 0
+    print(f"[应用日志] 搜索 '{fallback_msg}' 匹配到 {len(fallback_matches)} 行:", flush=True)
+    for m in fallback_matches[:5]:
+        print(f"  {m[:120]}", flush=True)
 
-    ble_path = _get_ble_path(sensor)
-    print(f"[bin] stop 后 getParam('DEBUG_BLE_DATA_PATH') = {ble_path!r}", flush=True)
+    # 验证回退：sensor.log 的消息出现在 controller 日志中
+    record(results, "profile 未启用时回退 controller log", found_fallback,
+           f"sensor.log('{fallback_msg}', 'D') 在 profile 未启用时应出现在 controller 日志中",
+           f"匹配到 {len(fallback_matches)} 行" if found_fallback else "未找到匹配行")
 
-    # 断开（若 stop 未导出，disconnect 时也会导出）
+    # 断开
     try:
         sensor.disconnect()
     except Exception as e:
         print(f"[断开] SensorProfile.disconnect 抛异常 {type(e).__name__}: {e}", flush=True)
 
-    if not isinstance(ble_path, str) or not ble_path.strip():
-        ble_path = _get_ble_path(sensor)
-        print(f"[bin] disconnect 后 getParam('DEBUG_BLE_DATA_PATH') = {ble_path!r}", flush=True)
-
-    # 给文件系统收尾留一点时间
-    time.sleep(0.5)
-
-    # 以 getParam 返回路径为主；为空则回退到目录扫描
-    bins_after = _list_bins(log_dir)
-    new_bins = sorted(set(bins_after.keys()) - set(bins_before.keys()))
-    print(f"\n[检查] 日志目录 {log_dir}", flush=True)
-    print(f"[检查] 新增 .bin 文件: {new_bins if new_bins else '无'}", flush=True)
-
-    bin_path = ble_path if (isinstance(ble_path, str) and ble_path.strip()) else None
-    if bin_path is None and new_bins:
-        bin_path = bins_after[new_bins[0]]
-
-    # 1) 生成了 bin（路径非空且文件存在）
-    if bin_path:
-        exists = os.path.isfile(bin_path)
-        generated = exists
-        actual_txt = f"{bin_path}（存在={exists}）"
-    else:
-        generated = False
-        actual_txt = f"未取得 bin 路径；目录新增 {new_bins}"
-    print(f"[检查] bin 路径: {bin_path!r}，文件存在={generated}", flush=True)
-    record(results, "连接起流后生成 .bin", generated,
-           "DEBUG_BLE_DATA_PATH=True 且 getParam 返回的路径文件存在",
-           actual_txt)
-
-    # 2) 文件名符合约定（含时间戳 + 设备名/_data_ 之一）
-    ts_pat = re.compile(r"\d{8}_\d{6}")
-    naming_ok = False
-    naming_actual = actual_txt
-    if bin_path:
-        fname = os.path.basename(bin_path)
-        has_ts = bool(ts_pat.search(fname))
-        has_name = bool(base_name and base_name in fname) or bool(identity and identity in fname)
-        has_data = "_data_" in fname
-        naming_ok = has_ts and (has_name or has_data)
-        naming_actual = fname
-        print(f"[检查] 文件名: {fname}（含时间戳={has_ts}, 含设备名/identity={has_name}, 含_data_={has_data}）", flush=True)
-
-    record(results, "bin 文件名符合约定", naming_ok,
-           "文件名含 YYYYMMDD_HHMMSS 时间戳，且含设备名(或 identity 或 _data_)",
-           naming_actual)
-
-    # 清理：关闭导出与调试日志，避免遗留
-    try:
-        sensor.setParam("DEBUG_BLE_DATA_PATH", "False")
-    except Exception:
-        pass
+    # 清理
     try:
         ctrl.setDebugEnabled(False)
     except Exception:
@@ -315,7 +318,7 @@ def main():
         if status == "FAIL":
             all_pass = False
 
-    print(f"\n[提示] 本次 bin 落盘目录: {log_dir}", flush=True)
+    print(f"\n[提示] 本次日志落盘目录: {log_dir}", flush=True)
     print("\n结论: " + ("PASS" if all_pass else "FAIL"), flush=True)
 
 

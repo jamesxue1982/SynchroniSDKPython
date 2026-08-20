@@ -127,12 +127,19 @@ def main():
         return
 
     # 扫描匹配
-    print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
+    print(f"\n[扫描] 目标 identity: {common.TARGET_IDENTITIES}", flush=True)
+    print(f"[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
     try:
         devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
     except Exception as e:
         devices = None
         print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
+    print(f"[扫描] 扫描到 {len(devices) if devices else 0} 台设备:", flush=True)
+    if devices:
+        for d in devices:
+            n = getattr(d, 'Name', '?')
+            a = getattr(d, 'Address', '?')
+            print(f"  {n} {a} identity={_identity_of(n)}", flush=True)
     target = match_target(devices)
 
     if target is None:
