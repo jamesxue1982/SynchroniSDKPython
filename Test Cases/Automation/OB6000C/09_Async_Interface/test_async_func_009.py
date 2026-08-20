@@ -1,21 +1,23 @@
 # -*- coding: utf-8 -*-
-"""ASYNC-FUNC-007：asyncGetBatteryLevel 返回 0~100（或 -1），与同步 getBatteryLevel 一致。
+"""ASYNC-FUNC-009：asyncStopDataNotification 停流后，onDataCallback 不再收到新数据（回调静默）。
 
-对应用例：09_异步接口.md -> ASYNC-FUNC-007
+对应用例：09_异步接口.md -> ASYNC-FUNC-009
 可自动化：auto（需待测设备上电在范围内）
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
-  - 待测设备：OYWW1100 上电、在范围内
+  - 待测设备：OB6000C 上电、在范围内
 
 流程：
   1) 确认设备开机 -> 按回车
-  2) scan 匹配 OYWW1100 -> requireSensor
+  2) scan 匹配 OB6000C -> requireSensor
   3) await sensor.asyncConnect() -> 到达 Ready
   4) await sensor.asyncInit(20, 1000)
-  5) await sensor.asyncGetBatteryLevel() -> 校验 0~100 或 -1
-  6) 同步 sensor.getBatteryLevel() -> 与异步结果比较
-  7) 两者应相等
+  5) 注册 onDataCallback 累计回调批数
+  6) await sensor.asyncStartDataNotification() -> 返回 True，isDataTransfering==True
+  7) 等待 3 秒收集数据
+  8) await sensor.asyncStopDataNotification() -> 返回 True，isDataTransfering==False
+  9) 等待 1 秒，检查回调批数不再增长（回调已静默）
 """
 
 import asyncio
@@ -31,21 +33,46 @@ from sensor import *
 import config
 from common import record, _identity_of, match_target
 
+COLLECT_SECONDS = 3
+STOP_WAIT_SECONDS = 1
+
+
+class DataResult:
+    def __init__(self):
+        self.batches = 0
+        self.total_samples = 0
+
+
+def make_on_data(result):
+    def on_data(sensor, data):
+        items = data if isinstance(data, list) else [data]
+        for d in items:
+            result.batches += 1
+            cs = getattr(d, 'channelSamples', None)
+            n = 0
+            if cs:
+                try:
+                    n = sum(len(ch) for ch in cs)
+                except TypeError:
+                    n = len(cs)
+            result.total_samples += n
+    return on_data
+
 
 async def main_async():
     ctrl = SensorControllerInstance
 
     print("=" * 60, flush=True)
-    print("ASYNC-FUNC-007 asyncGetBatteryLevel 返回 0~100（或 -1），与同步 getBatteryLevel 一致", flush=True)
+    print("ASYNC-FUNC-009 asyncStopDataNotification 停流后回调静默", flush=True)
     print("=" * 60, flush=True)
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
 
     print("\n[前置条件]", flush=True)
     print("  - 主机(电脑)：蓝牙已开启", flush=True)
-    print("  - 待测设备：OYWW1100 上电、在范围内", flush=True)
+    print("  - 待测设备：OB6000C 上电、在范围内", flush=True)
 
-    input("\n>>> [人工操作] 请确认待测设备 OYWW1100 已【开机】且在范围内，完成后按回车继续 ...")
+    input("\n>>> [人工操作] 请确认待测设备 OB6000C 已【开机】且在范围内，完成后按回车继续 ...")
 
     results = []
 
@@ -133,51 +160,59 @@ async def main_async():
     record(results, "asyncInit 返回 True", ok_init is True,
            "asyncInit(20, 1000) 返回 True", f"asyncInit() -> {ok_init}")
 
-    # ---- asyncGetBatteryLevel ----
-    print("\n[异步电量] await sensor.asyncGetBatteryLevel() ...", flush=True)
+    # 注册数据回调
+    data_result = DataResult()
+    sensor.onDataCallback = make_on_data(data_result)
+
+    # ---- asyncStartDataNotification ----
+    print("\n[异步起流] await sensor.asyncStartDataNotification() ...", flush=True)
     try:
-        async_battery = await sensor.asyncGetBatteryLevel()
+        start_ok = await sensor.asyncStartDataNotification()
     except Exception as e:
-        async_battery = None
-        print(f"[异步电量] 抛异常 {type(e).__name__}: {e}", flush=True)
-    print(f"[异步电量] sensor.asyncGetBatteryLevel() -> {async_battery!r} (type={type(async_battery).__name__})", flush=True)
+        start_ok = False
+        print(f"[异步起流] 抛异常 {type(e).__name__}: {e}", flush=True)
+    print(f"[异步起流] sensor.asyncStartDataNotification() -> {start_ok}", flush=True)
+    record(results, "asyncStartDataNotification 返回 True", start_ok is True,
+           "asyncStartDataNotification() 返回 True", f"asyncStartDataNotification() -> {start_ok}")
 
-    if isinstance(async_battery, int):
-        if async_battery == -1:
-            record(results, "asyncGetBatteryLevel 返回 0~100（或 -1）", None,
-                   "返回 int 0~100 或 -1", "返回 -1（设备无有效电量读数）")
-        elif 0 <= async_battery <= 100:
-            record(results, "asyncGetBatteryLevel 返回 0~100（或 -1）", True,
-                   "返回 int 0~100 或 -1", f"返回 {async_battery}")
-        else:
-            record(results, "asyncGetBatteryLevel 返回 0~100（或 -1）", False,
-                   "返回 int 0~100 或 -1", f"返回 {async_battery}（超出范围）")
-    else:
-        record(results, "asyncGetBatteryLevel 返回 0~100（或 -1）", False,
-               "返回 int 0~100 或 -1", f"返回 {async_battery!r} (type={type(async_battery).__name__})")
+    transferring = sensor.isDataTransfering
+    print(f"[检查2] 起流后 isDataTransfering = {transferring}", flush=True)
+    record(results, "起流后 isDataTransfering==True", transferring is True,
+           "isDataTransfering == True", f"isDataTransfering == {transferring}")
 
-    # ---- 同步 getBatteryLevel 比较 ----
-    print("\n[同步电量] sensor.getBatteryLevel() ...", flush=True)
+    # 采集数据
+    print(f"\n[采集] 等待 {COLLECT_SECONDS}s 观察 onDataCallback ...", flush=True)
+    await asyncio.sleep(COLLECT_SECONDS)
+    batches_before_stop = data_result.batches
+    print(f"[采集] 停流前批数={batches_before_stop}", flush=True)
+
+    # ---- asyncStopDataNotification ----
+    print("\n[异步停流] await sensor.asyncStopDataNotification() ...", flush=True)
     try:
-        sync_battery = sensor.getBatteryLevel()
+        stop_ok = await sensor.asyncStopDataNotification()
     except Exception as e:
-        sync_battery = None
-        print(f"[同步电量] 抛异常 {type(e).__name__}: {e}", flush=True)
-    print(f"[同步电量] sensor.getBatteryLevel() -> {sync_battery!r} (type={type(sync_battery).__name__})", flush=True)
+        stop_ok = False
+        print(f"[异步停流] 抛异常 {type(e).__name__}: {e}", flush=True)
+    print(f"[异步停流] sensor.asyncStopDataNotification() -> {stop_ok}", flush=True)
+    record(results, "asyncStopDataNotification 返回 True", stop_ok is True,
+           "asyncStopDataNotification() 返回 True", f"asyncStopDataNotification() -> {stop_ok}")
 
-    if isinstance(async_battery, int) and isinstance(sync_battery, int):
-        diff = abs(async_battery - sync_battery)
-        max_val = max(abs(async_battery), abs(sync_battery), 1)
-        pct = diff / max_val * 100
-        match = pct <= 3
-        print(f"[比较] async={async_battery} sync={sync_battery} diff={diff} ({pct:.1f}%) <= 3% ? {match}", flush=True)
-        record(results, "asyncGetBatteryLevel 与同步 getBatteryLevel 结果一致（误差≤3%）", match,
-               "误差 ≤ 3%", f"async={async_battery} sync={sync_battery} diff={diff} ({pct:.1f}%)")
-    else:
-        record(results, "asyncGetBatteryLevel 与同步 getBatteryLevel 结果一致", False,
-               "两者返回相同 int 值", f"async={async_battery!r} sync={sync_battery!r}")
+    transferring_after = sensor.isDataTransfering
+    print(f"[检查3] 停流后 isDataTransfering = {transferring_after}", flush=True)
+    record(results, "停流后 isDataTransfering==False", transferring_after is False,
+           "isDataTransfering == False", f"isDataTransfering == {transferring_after}")
+
+    # 等待 1 秒，验证回调静默
+    print(f"\n[静默验证] 等待 {STOP_WAIT_SECONDS}s，检查 onDataCallback 是否不再触发 ...", flush=True)
+    await asyncio.sleep(STOP_WAIT_SECONDS)
+    batches_after_stop = data_result.batches
+    callbacks_stopped = (batches_after_stop == batches_before_stop)
+    print(f"[静默验证] 停流前批数={batches_before_stop}  停流后批数={batches_after_stop}  是否静默={callbacks_stopped}", flush=True)
+    record(results, "停流后 onDataCallback 回调已静默（批数不增长）", callbacks_stopped,
+           "停流后批数不增长", f"停流前={batches_before_stop} 停流后={batches_after_stop}")
 
     # 清理
+    sensor.onDataCallback = None
     try:
         await sensor.asyncDisconnect()
     except Exception as e:
@@ -191,13 +226,11 @@ async def main_async():
     for rname, status, expect, actual in results:
         if status == "PASS":
             print(f"  [PASS] {rname}（实际: {actual}）", flush=True)
-        elif status == "SKIP":
-            print(f"  [SKIP] {rname}（{actual}）", flush=True)
         else:
             print(f"  [FAIL] {rname}", flush=True)
             print(f"         期待: {expect}", flush=True)
             print(f"         实际: {actual}", flush=True)
-        if status == "FAIL":
+        if status != "PASS":
             all_pass = False
 
     print("\n结论: " + ("PASS" if all_pass else "FAIL"), flush=True)

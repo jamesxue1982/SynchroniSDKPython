@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
-"""ASYNC-FUNC-002：asyncConnect 成功/失败。
+"""ASYNC-FUNC-003：asyncDisconnect 成功。
 
-对应用例：09_异步接口.md -> ASYNC-FUNC-002
+对应用例：09_异步接口.md -> ASYNC-FUNC-003
 可自动化：auto（需待测设备上电在范围内）
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
-  - 待测设备：OYWW1100 上电、在范围内
+  - 待测设备：OB6000C 上电、在范围内
 
 流程：
   1) 确认设备开机 -> 按回车
-  2) scan 匹配 OYWW1100 -> requireSensor
-  3) await sensor.asyncConnect() -> 断言返回 True，deviceState==Ready
-  4) disconnect
-  5) 对无效设备（None）调用 asyncConnect -> 断言返回 False
+  2) scan 匹配 OB6000C -> requireSensor
+  3) await sensor.asyncConnect() -> 到达 Ready
+  4) await sensor.asyncDisconnect() -> 断言返回 True
+  5) 断言 deviceState==Disconnected
 """
 
 import asyncio
@@ -33,16 +33,16 @@ async def main_async():
     ctrl = SensorControllerInstance
 
     print("=" * 60, flush=True)
-    print("ASYNC-FUNC-002 asyncConnect 成功/失败", flush=True)
+    print("ASYNC-FUNC-003 asyncDisconnect 成功", flush=True)
     print("=" * 60, flush=True)
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
 
     print("\n[前置条件]", flush=True)
     print("  - 主机(电脑)：蓝牙已开启", flush=True)
-    print("  - 待测设备：OYWW1100 上电、在范围内", flush=True)
+    print("  - 待测设备：OB6000C 上电、在范围内", flush=True)
 
-    input("\n>>> [人工操作] 请确认待测设备 OYWW1100 已【开机】且在范围内，完成后按回车继续 ...")
+    input("\n>>> [人工操作] 请确认待测设备 OB6000C 已【开机】且在范围内，完成后按回车继续 ...")
 
     results = []
 
@@ -84,14 +84,19 @@ async def main_async():
     record(results, "requireSensor 返回 SensorProfile", isinstance(sensor, SensorProfile),
            "返回 SensorProfile", f"返回 {type(sensor).__name__}")
 
-    # ---- asyncConnect 成功场景 ----
+    # asyncConnect
     print("\n[异步连接] await sensor.asyncConnect() ...", flush=True)
     try:
         ok = await sensor.asyncConnect()
     except Exception as e:
         ok = False
         print(f"[异步连接] 抛异常 {type(e).__name__}: {e}", flush=True)
-    print(f"[异步连接] sensor.asyncConnect() -> {ok}", flush=True)
+    if ok is not True:
+        print("[FAIL] asyncConnect 失败，无法继续测试 asyncDisconnect", flush=True)
+        record(results, "asyncConnect 返回 True", ok is True,
+               "asyncConnect() 返回 True", f"asyncConnect() -> {ok}")
+        ctrl.terminate()
+        return
     record(results, "asyncConnect 返回 True", ok is True,
            "asyncConnect() 返回 True", f"asyncConnect() -> {ok}")
 
@@ -100,31 +105,21 @@ async def main_async():
     record(results, "asyncConnect 后 deviceState==Ready", state == DeviceStateEx.Ready,
            "deviceState == DeviceStateEx.Ready", f"deviceState == {state}")
 
-    # 断开以便后续测试
-    print("\n[断开] await sensor.asyncDisconnect() ...", flush=True)
+    # asyncDisconnect
+    print("\n[异步断开] await sensor.asyncDisconnect() ...", flush=True)
     try:
-        await sensor.asyncDisconnect()
+        ok_disconnect = await sensor.asyncDisconnect()
     except Exception as e:
-        print(f"[断开] 抛异常 {type(e).__name__}: {e}", flush=True)
+        ok_disconnect = False
+        print(f"[异步断开] 抛异常 {type(e).__name__}: {e}", flush=True)
+    print(f"[异步断开] sensor.asyncDisconnect() -> {ok_disconnect}", flush=True)
+    record(results, "asyncDisconnect 返回 True", ok_disconnect is True,
+           "asyncDisconnect() 返回 True", f"asyncDisconnect() -> {ok_disconnect}")
 
-    # ---- asyncConnect 失败场景（无效设备） ----
-    # 构造一个不存在的 MAC 地址，创建无效 sensor
-    print("\n[异步连接-失败] 构造无效设备，调用 asyncConnect ...", flush=True)
-    invalid_device = BLEDevice("FAKE", "00:00:00:00:00:00", 0)
-    invalid_sensor = ctrl.requireSensor(invalid_device)
-    if invalid_sensor is None:
-        print("[异步连接-失败] requireSensor(无效设备) 返回 None，无法构造无效设备", flush=True)
-        record(results, "对无效设备 asyncConnect 返回 False", None,
-               "asyncConnect() 返回 False", "requireSensor 返回 None，无法构造无效设备")
-    else:
-        try:
-            ok_fail = await invalid_sensor.asyncConnect()
-        except Exception as e:
-            ok_fail = False
-            print(f"[异步连接-失败] 抛异常 {type(e).__name__}: {e}", flush=True)
-        print(f"[异步连接-失败] asyncConnect() -> {ok_fail}", flush=True)
-        record(results, "对无效设备 asyncConnect 返回 False", ok_fail is False,
-               "asyncConnect() 返回 False", f"asyncConnect() -> {ok_fail}")
+    final_state = sensor.deviceState
+    print(f"[检查2] 断开后 deviceState = {final_state}", flush=True)
+    record(results, "asyncDisconnect 后 deviceState==Disconnected", final_state == DeviceStateEx.Disconnected,
+           "deviceState == DeviceStateEx.Disconnected", f"deviceState == {final_state}")
 
     # ---- 汇总 ----
     print("\n" + "=" * 60, flush=True)

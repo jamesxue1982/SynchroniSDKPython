@@ -6,11 +6,11 @@
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
-  - 待测设备：OYWW1100 上电、在范围内
+  - 待测设备：OB6000C 上电、在范围内
 
 流程：
   1) 确认设备开机 -> 按回车
-  2) scan 匹配 OYWW1100 -> requireSensor
+  2) scan 匹配 OB6000C -> requireSensor
   3) await sensor.asyncConnect() -> 断言返回 True，deviceState==Ready
   4) disconnect
   5) 对无效设备（None）调用 asyncConnect -> 断言返回 False
@@ -40,9 +40,9 @@ async def main_async():
 
     print("\n[前置条件]", flush=True)
     print("  - 主机(电脑)：蓝牙已开启", flush=True)
-    print("  - 待测设备：OYWW1100 上电、在范围内", flush=True)
+    print("  - 待测设备：OB6000C 上电、在范围内", flush=True)
 
-    input("\n>>> [人工操作] 请确认待测设备 OYWW1100 已【开机】且在范围内，完成后按回车继续 ...")
+    input("\n>>> [人工操作] 请确认待测设备 OB6000C 已【开机】且在范围内，完成后按回车继续 ...")
 
     results = []
 

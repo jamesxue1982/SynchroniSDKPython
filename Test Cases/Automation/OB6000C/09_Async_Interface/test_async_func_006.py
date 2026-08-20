@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
-"""ASYNC-FUNC-007：asyncGetBatteryLevel 返回 0~100（或 -1），与同步 getBatteryLevel 一致。
+"""ASYNC-FUNC-006：asyncGetParam 获取参数，与同步 getParam 结果一致。
 
-对应用例：09_异步接口.md -> ASYNC-FUNC-007
+对应用例：09_异步接口.md -> ASYNC-FUNC-006
 可自动化：auto（需待测设备上电在范围内）
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
-  - 待测设备：OYWW1100 上电、在范围内
+  - 待测设备：OB6000C 上电、在范围内
 
 流程：
   1) 确认设备开机 -> 按回车
-  2) scan 匹配 OYWW1100 -> requireSensor
+  2) scan 匹配 OB6000C -> requireSensor
   3) await sensor.asyncConnect() -> 到达 Ready
   4) await sensor.asyncInit(20, 1000)
-  5) await sensor.asyncGetBatteryLevel() -> 校验 0~100 或 -1
-  6) 同步 sensor.getBatteryLevel() -> 与异步结果比较
-  7) 两者应相等
+  5) 先用同步 setParam("NTF_EMG", "ON") 设置一个确定值
+  6) await sensor.asyncGetParam("NTF") -> 与同步 sensor.getParam("NTF") 比较
+  7) 两者应一致
 """
 
 import asyncio
@@ -36,16 +36,16 @@ async def main_async():
     ctrl = SensorControllerInstance
 
     print("=" * 60, flush=True)
-    print("ASYNC-FUNC-007 asyncGetBatteryLevel 返回 0~100（或 -1），与同步 getBatteryLevel 一致", flush=True)
+    print("ASYNC-FUNC-006 asyncGetParam 获取参数，与同步 getParam 结果一致", flush=True)
     print("=" * 60, flush=True)
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
 
     print("\n[前置条件]", flush=True)
     print("  - 主机(电脑)：蓝牙已开启", flush=True)
-    print("  - 待测设备：OYWW1100 上电、在范围内", flush=True)
+    print("  - 待测设备：OB6000C 上电、在范围内", flush=True)
 
-    input("\n>>> [人工操作] 请确认待测设备 OYWW1100 已【开机】且在范围内，完成后按回车继续 ...")
+    input("\n>>> [人工操作] 请确认待测设备 OB6000C 已【开机】且在范围内，完成后按回车继续 ...")
 
     results = []
 
@@ -133,51 +133,46 @@ async def main_async():
     record(results, "asyncInit 返回 True", ok_init is True,
            "asyncInit(20, 1000) 返回 True", f"asyncInit() -> {ok_init}")
 
-    # ---- asyncGetBatteryLevel ----
-    print("\n[异步电量] await sensor.asyncGetBatteryLevel() ...", flush=True)
+    # 先用同步 setParam 设置一个确定值
+    print("\n[同步设置] sensor.setParam('NTF_EMG', 'ON') ...", flush=True)
     try:
-        async_battery = await sensor.asyncGetBatteryLevel()
+        set_r = sensor.setParam("NTF_EMG", "ON")
+        print(f"[同步设置] sensor.setParam('NTF_EMG', 'ON') -> {set_r!r}", flush=True)
     except Exception as e:
-        async_battery = None
-        print(f"[异步电量] 抛异常 {type(e).__name__}: {e}", flush=True)
-    print(f"[异步电量] sensor.asyncGetBatteryLevel() -> {async_battery!r} (type={type(async_battery).__name__})", flush=True)
+        set_r = None
+        print(f"[同步设置] 抛异常 {type(e).__name__}: {e}", flush=True)
 
-    if isinstance(async_battery, int):
-        if async_battery == -1:
-            record(results, "asyncGetBatteryLevel 返回 0~100（或 -1）", None,
-                   "返回 int 0~100 或 -1", "返回 -1（设备无有效电量读数）")
-        elif 0 <= async_battery <= 100:
-            record(results, "asyncGetBatteryLevel 返回 0~100（或 -1）", True,
-                   "返回 int 0~100 或 -1", f"返回 {async_battery}")
-        else:
-            record(results, "asyncGetBatteryLevel 返回 0~100（或 -1）", False,
-                   "返回 int 0~100 或 -1", f"返回 {async_battery}（超出范围）")
-    else:
-        record(results, "asyncGetBatteryLevel 返回 0~100（或 -1）", False,
-               "返回 int 0~100 或 -1", f"返回 {async_battery!r} (type={type(async_battery).__name__})")
-
-    # ---- 同步 getBatteryLevel 比较 ----
-    print("\n[同步电量] sensor.getBatteryLevel() ...", flush=True)
+    # ---- asyncGetParam 与同步 getParam 比较 ----
+    print("\n[异步获取] await sensor.asyncGetParam('NTF') ...", flush=True)
     try:
-        sync_battery = sensor.getBatteryLevel()
+        async_val = await sensor.asyncGetParam("NTF")
     except Exception as e:
-        sync_battery = None
-        print(f"[同步电量] 抛异常 {type(e).__name__}: {e}", flush=True)
-    print(f"[同步电量] sensor.getBatteryLevel() -> {sync_battery!r} (type={type(sync_battery).__name__})", flush=True)
+        async_val = None
+        print(f"[异步获取] 抛异常 {type(e).__name__}: {e}", flush=True)
+    print(f"[异步获取] sensor.asyncGetParam('NTF') -> {async_val!r}", flush=True)
 
-    if isinstance(async_battery, int) and isinstance(sync_battery, int):
-        diff = abs(async_battery - sync_battery)
-        max_val = max(abs(async_battery), abs(sync_battery), 1)
-        pct = diff / max_val * 100
-        match = pct <= 3
-        print(f"[比较] async={async_battery} sync={sync_battery} diff={diff} ({pct:.1f}%) <= 3% ? {match}", flush=True)
-        record(results, "asyncGetBatteryLevel 与同步 getBatteryLevel 结果一致（误差≤3%）", match,
-               "误差 ≤ 3%", f"async={async_battery} sync={sync_battery} diff={diff} ({pct:.1f}%)")
-    else:
-        record(results, "asyncGetBatteryLevel 与同步 getBatteryLevel 结果一致", False,
-               "两者返回相同 int 值", f"async={async_battery!r} sync={sync_battery!r}")
+    print("\n[同步获取] sensor.getParam('NTF') ...", flush=True)
+    try:
+        sync_val = sensor.getParam("NTF")
+    except Exception as e:
+        sync_val = None
+        print(f"[同步获取] 抛异常 {type(e).__name__}: {e}", flush=True)
+    print(f"[同步获取] sensor.getParam('NTF') -> {sync_val!r}", flush=True)
 
-    # 清理
+    # 比较
+    both_none = (async_val is None and sync_val is None)
+    match = both_none or (async_val == sync_val)
+    print(f"\n[比较] asyncGetParam('NTF') == getParam('NTF') ? {match}", flush=True)
+    record(results, "asyncGetParam('NTF') 与同步 getParam('NTF') 结果一致", match,
+           "asyncGetParam 与 getParam 返回相同值",
+           f"async={async_val!r} sync={sync_val!r}")
+
+    # 清理：恢复 OFF
+    try:
+        sensor.setParam("NTF_EMG", "OFF")
+    except Exception:
+        pass
+
     try:
         await sensor.asyncDisconnect()
     except Exception as e:
@@ -191,13 +186,11 @@ async def main_async():
     for rname, status, expect, actual in results:
         if status == "PASS":
             print(f"  [PASS] {rname}（实际: {actual}）", flush=True)
-        elif status == "SKIP":
-            print(f"  [SKIP] {rname}（{actual}）", flush=True)
         else:
             print(f"  [FAIL] {rname}", flush=True)
             print(f"         期待: {expect}", flush=True)
             print(f"         实际: {actual}", flush=True)
-        if status == "FAIL":
+        if status != "PASS":
             all_pass = False
 
     print("\n结论: " + ("PASS" if all_pass else "FAIL"), flush=True)

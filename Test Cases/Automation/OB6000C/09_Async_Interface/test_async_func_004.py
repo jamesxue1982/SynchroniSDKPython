@@ -1,27 +1,25 @@
 # -*- coding: utf-8 -*-
-"""ASYNC-FUNC-007：asyncGetBatteryLevel 返回 0~100（或 -1），与同步 getBatteryLevel 一致。
+"""ASYNC-FUNC-004：asyncInit 成功/失败。
 
-对应用例：09_异步接口.md -> ASYNC-FUNC-007
+对应用例：09_异步接口.md -> ASYNC-FUNC-004
 可自动化：auto（需待测设备上电在范围内）
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
-  - 待测设备：OYWW1100 上电、在范围内
+  - 待测设备：OB6000C 上电、在范围内
 
 流程：
   1) 确认设备开机 -> 按回车
-  2) scan 匹配 OYWW1100 -> requireSensor
+  2) scan 匹配 OB6000C -> requireSensor
   3) await sensor.asyncConnect() -> 到达 Ready
-  4) await sensor.asyncInit(20, 1000)
-  5) await sensor.asyncGetBatteryLevel() -> 校验 0~100 或 -1
-  6) 同步 sensor.getBatteryLevel() -> 与异步结果比较
-  7) 两者应相等
+  4) await sensor.asyncInit(20, 1000) -> 断言返回 True，hasInited==True
+  5) disconnect
+  6) 未 Ready 时调用 asyncInit -> 断言返回 False
 """
 
 import asyncio
 import os
 import sys
-import time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUTOMATION_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
@@ -36,16 +34,16 @@ async def main_async():
     ctrl = SensorControllerInstance
 
     print("=" * 60, flush=True)
-    print("ASYNC-FUNC-007 asyncGetBatteryLevel 返回 0~100（或 -1），与同步 getBatteryLevel 一致", flush=True)
+    print("ASYNC-FUNC-004 asyncInit 成功/失败", flush=True)
     print("=" * 60, flush=True)
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
 
     print("\n[前置条件]", flush=True)
     print("  - 主机(电脑)：蓝牙已开启", flush=True)
-    print("  - 待测设备：OYWW1100 上电、在范围内", flush=True)
+    print("  - 待测设备：OB6000C 上电、在范围内", flush=True)
 
-    input("\n>>> [人工操作] 请确认待测设备 OYWW1100 已【开机】且在范围内，完成后按回车继续 ...")
+    input("\n>>> [人工操作] 请确认待测设备 OB6000C 已【开机】且在范围内，完成后按回车继续 ...")
 
     results = []
 
@@ -95,7 +93,7 @@ async def main_async():
         ok = False
         print(f"[异步连接] 抛异常 {type(e).__name__}: {e}", flush=True)
     if ok is not True:
-        print("[FAIL] asyncConnect 失败，无法继续测试", flush=True)
+        print("[FAIL] asyncConnect 失败，无法继续测试 asyncInit", flush=True)
         record(results, "asyncConnect 返回 True", ok is True,
                "asyncConnect() 返回 True", f"asyncConnect() -> {ok}")
         ctrl.terminate()
@@ -103,26 +101,12 @@ async def main_async():
     record(results, "asyncConnect 返回 True", ok is True,
            "asyncConnect() 返回 True", f"asyncConnect() -> {ok}")
 
-    # 等待 Ready
-    t0 = time.time()
-    while time.time() - t0 < 15 and sensor.deviceState != DeviceStateEx.Ready:
-        time.sleep(0.2)
     state = sensor.deviceState
-    ready = (state == DeviceStateEx.Ready)
     print(f"[检查1] 连接后 deviceState = {state}", flush=True)
-    record(results, "asyncConnect 后 deviceState==Ready", ready,
+    record(results, "asyncConnect 后 deviceState==Ready", state == DeviceStateEx.Ready,
            "deviceState == DeviceStateEx.Ready", f"deviceState == {state}")
 
-    if not ready:
-        print("[FAIL] 未到达 Ready，无法继续", flush=True)
-        try:
-            await sensor.asyncDisconnect()
-        except Exception:
-            pass
-        ctrl.terminate()
-        return
-
-    # asyncInit
+    # ---- asyncInit 成功场景 ----
     print("\n[异步初始化] await sensor.asyncInit(20, 1000) ...", flush=True)
     try:
         ok_init = await sensor.asyncInit(20, 1000)
@@ -133,55 +117,29 @@ async def main_async():
     record(results, "asyncInit 返回 True", ok_init is True,
            "asyncInit(20, 1000) 返回 True", f"asyncInit() -> {ok_init}")
 
-    # ---- asyncGetBatteryLevel ----
-    print("\n[异步电量] await sensor.asyncGetBatteryLevel() ...", flush=True)
-    try:
-        async_battery = await sensor.asyncGetBatteryLevel()
-    except Exception as e:
-        async_battery = None
-        print(f"[异步电量] 抛异常 {type(e).__name__}: {e}", flush=True)
-    print(f"[异步电量] sensor.asyncGetBatteryLevel() -> {async_battery!r} (type={type(async_battery).__name__})", flush=True)
+    has_inited = sensor.hasInited
+    print(f"[检查2] hasInited = {has_inited}", flush=True)
+    record(results, "asyncInit 后 hasInited==True", has_inited is True,
+           "hasInited == True", f"hasInited == {has_inited}")
 
-    if isinstance(async_battery, int):
-        if async_battery == -1:
-            record(results, "asyncGetBatteryLevel 返回 0~100（或 -1）", None,
-                   "返回 int 0~100 或 -1", "返回 -1（设备无有效电量读数）")
-        elif 0 <= async_battery <= 100:
-            record(results, "asyncGetBatteryLevel 返回 0~100（或 -1）", True,
-                   "返回 int 0~100 或 -1", f"返回 {async_battery}")
-        else:
-            record(results, "asyncGetBatteryLevel 返回 0~100（或 -1）", False,
-                   "返回 int 0~100 或 -1", f"返回 {async_battery}（超出范围）")
-    else:
-        record(results, "asyncGetBatteryLevel 返回 0~100（或 -1）", False,
-               "返回 int 0~100 或 -1", f"返回 {async_battery!r} (type={type(async_battery).__name__})")
-
-    # ---- 同步 getBatteryLevel 比较 ----
-    print("\n[同步电量] sensor.getBatteryLevel() ...", flush=True)
-    try:
-        sync_battery = sensor.getBatteryLevel()
-    except Exception as e:
-        sync_battery = None
-        print(f"[同步电量] 抛异常 {type(e).__name__}: {e}", flush=True)
-    print(f"[同步电量] sensor.getBatteryLevel() -> {sync_battery!r} (type={type(sync_battery).__name__})", flush=True)
-
-    if isinstance(async_battery, int) and isinstance(sync_battery, int):
-        diff = abs(async_battery - sync_battery)
-        max_val = max(abs(async_battery), abs(sync_battery), 1)
-        pct = diff / max_val * 100
-        match = pct <= 3
-        print(f"[比较] async={async_battery} sync={sync_battery} diff={diff} ({pct:.1f}%) <= 3% ? {match}", flush=True)
-        record(results, "asyncGetBatteryLevel 与同步 getBatteryLevel 结果一致（误差≤3%）", match,
-               "误差 ≤ 3%", f"async={async_battery} sync={sync_battery} diff={diff} ({pct:.1f}%)")
-    else:
-        record(results, "asyncGetBatteryLevel 与同步 getBatteryLevel 结果一致", False,
-               "两者返回相同 int 值", f"async={async_battery!r} sync={sync_battery!r}")
-
-    # 清理
+    # 断开以便测试失败场景
+    print("\n[断开] await sensor.asyncDisconnect() ...", flush=True)
     try:
         await sensor.asyncDisconnect()
     except Exception as e:
         print(f"[断开] 抛异常 {type(e).__name__}: {e}", flush=True)
+
+    # ---- asyncInit 失败场景（未 Ready） ----
+    print("\n[异步初始化-失败] 未 Ready 时调用 asyncInit ...", flush=True)
+    print(f"  [状态] 当前 deviceState = {sensor.deviceState}", flush=True)
+    try:
+        ok_init_fail = await sensor.asyncInit(20, 1000)
+    except Exception as e:
+        ok_init_fail = False
+        print(f"[异步初始化-失败] 抛异常 {type(e).__name__}: {e}", flush=True)
+    print(f"[异步初始化-失败] sensor.asyncInit(20, 1000) -> {ok_init_fail}", flush=True)
+    record(results, "未 Ready 时 asyncInit 返回 False", ok_init_fail is False,
+           "asyncInit() 返回 False", f"asyncInit() -> {ok_init_fail}")
 
     # ---- 汇总 ----
     print("\n" + "=" * 60, flush=True)
@@ -191,13 +149,11 @@ async def main_async():
     for rname, status, expect, actual in results:
         if status == "PASS":
             print(f"  [PASS] {rname}（实际: {actual}）", flush=True)
-        elif status == "SKIP":
-            print(f"  [SKIP] {rname}（{actual}）", flush=True)
         else:
             print(f"  [FAIL] {rname}", flush=True)
             print(f"         期待: {expect}", flush=True)
             print(f"         实际: {actual}", flush=True)
-        if status == "FAIL":
+        if status != "PASS":
             all_pass = False
 
     print("\n结论: " + ("PASS" if all_pass else "FAIL"), flush=True)
