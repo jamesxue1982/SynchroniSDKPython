@@ -63,19 +63,19 @@
 <!-- 总览 -->
 <div class="summary">
   <div class="summary-card total"><div class="num">104</div><div class="label">总用例数</div></div>
-  <div class="summary-card pass"><div class="num">77</div><div class="label">通过</div></div>
-  <div class="summary-card fail"><div class="num">22</div><div class="label">失败</div></div>
-  <div class="summary-card pending"><div class="num">4</div><div class="label">待测试</div></div>
+  <div class="summary-card pass"><div class="num">80</div><div class="label">通过</div></div>
+  <div class="summary-card fail"><div class="num">23</div><div class="label">失败</div></div>
+  <div class="summary-card pending"><div class="num">0</div><div class="label">待测试</div></div>
   <div class="summary-card skip"><div class="num">1</div><div class="label">无法执行</div></div>
 </div>
 
 <div class="rate-bar">
-  <div class="pass-fill" style="width:74.0%"></div>
-  <div class="fail-fill" style="width:21.2%"></div>
-  <div class="pending-fill" style="width:3.8%"></div>
+  <div class="pass-fill" style="width:76.9%"></div>
+  <div class="fail-fill" style="width:22.1%"></div>
+  <div class="pending-fill" style="width:0%"></div>
   <div class="skip-fill" style="width:1.0%"></div>
 </div>
-<div class="rate-text">通过率: 77.8%（77/99 已执行）&nbsp;|&nbsp; 含待测试/不适用在内: 74.0%（77/104）</div>
+<div class="rate-text">通过率: 77.7%（80/103 已执行）&nbsp;|&nbsp; 含待测试/不适用在内: 76.9%（80/104）</div>
 
 <!-- 环境信息 -->
 <div class="info-grid">
@@ -121,7 +121,7 @@
 
 <!-- ===== 01 控制器与扫描 ===== -->
 <section id="ctrl">
-<h2>01 控制器与扫描 (CTRL-*) <span class="count">15 用例 | 9 PASS | 5 FAIL | 1 待测试</span></h2>
+<h2>01 控制器与扫描 (CTRL-*) <span class="count">15 用例 | 10 PASS | 5 FAIL</span></h2>
 <table>
 <tr><th>用例 ID</th><th>名称</th><th>结果</th><th>备注</th></tr>
 <tr><td>CTRL-FUNC-001</td><td>蓝牙未开启时 isEnable==False，startScan 被拒绝</td><td><span class="badge badge-fail">失败</span></td><td>问题 7060</td></tr>
@@ -138,7 +138,7 @@
 <tr><td>CTRL-FUNC-012</td><td>getVersion 返回非空</td><td><span class="badge badge-pass">通过</span></td><td></td></tr>
 <tr><td>CTRL-FUNC-013</td><td>terminate 重复调用不抛异常</td><td><span class="badge badge-pass">通过</span></td><td></td></tr>
 <tr><td>CTRL-BND-001</td><td>startScan(period_in_ms) 6 点边界</td><td><span class="badge badge-fail">失败</span></td><td>问题 7066</td></tr>
-<tr><td>CTRL-ROB-001</td><td>扫描期间重复 start/stop</td><td><span class="badge badge-pending">待测试</span></td><td></td></tr>
+<tr><td>CTRL-ROB-001</td><td>扫描期间重复 start/stop</td><td><span class="badge badge-pass">通过</span></td><td></td></tr>
 </table>
 </section>
 
@@ -166,14 +166,14 @@
 
 <!-- ===== 03 数据流 ===== -->
 <section id="data">
-<h2>03 数据流 (DATA-*) <span class="count">17 用例 | 9 PASS | 6 FAIL | 1 待测试 | 1 跳过</span></h2>
+<h2>03 数据流 (DATA-*) <span class="count">17 用例 | 9 PASS | 7 FAIL | 1 跳过</span></h2>
 <table>
 <tr><th>用例 ID</th><th>名称</th><th>结果</th><th>备注</th></tr>
 <tr><td>DATA-FUNC-001</td><td>init(packageSampleCount, powerRefreshInterval) 成功</td><td><span class="badge badge-pass">通过</span></td><td></td></tr>
 <tr><td>DATA-FUNC-002</td><td>未 Ready 前 init/startDataNotification 失败</td><td><span class="badge badge-pass">通过</span></td><td></td></tr>
 <tr><td>DATA-FUNC-003</td><td>startDataNotification 后 isDataTransfering==True</td><td><span class="badge badge-pass">通过</span></td><td></td></tr>
 <tr><td>DATA-FUNC-004</td><td>stopDataNotification 后停止</td><td><span class="badge badge-pass">通过</span></td><td></td></tr>
-<tr><td>DATA-FUNC-005</td><td>各 DataType 流能收到对应 SensorData</td><td><span class="badge badge-pending">待测试</span></td><td>问题 7069</td></tr>
+<tr><td>DATA-FUNC-005</td><td>各 DataType 流能收到对应 SensorData</td><td><span class="badge badge-fail">失败</span></td><td>问题 7069</td></tr>
 <tr><td>DATA-FUNC-006</td><td>SensorData 元数据合法</td><td><span class="badge badge-pass">通过</span></td><td></td></tr>
 <tr><td>DATA-FUNC-007</td><td>channelSamples/单点访问器一致，sampleIndex 单调</td><td><span class="badge badge-fail">失败</span></td><td>问题 7089</td></tr>
 <tr><td>DATA-FUNC-008</td><td>isLost 与 lostPackageCount 一致</td><td><span class="badge badge-pass">通过</span></td><td></td></tr>
@@ -274,7 +274,7 @@
 
 <!-- ===== 09 异步接口 ===== -->
 <section id="async">
-<h2>09 异步接口 (ASYNC-*) <span class="count">12 用例 | 7 PASS | 3 FAIL | 2 待测试</span></h2>
+<h2>09 异步接口 (ASYNC-*) <span class="count">12 用例 | 9 PASS | 3 FAIL</span></h2>
 <table>
 <tr><th>用例 ID</th><th>名称</th><th>结果</th><th>备注</th></tr>
 <tr><td>ASYNC-FUNC-001</td><td>asyncScan 返回设备列表</td><td><span class="badge badge-pass">通过</span></td><td></td></tr>
@@ -287,8 +287,8 @@
 <tr><td>ASYNC-FUNC-008</td><td>asyncStartDataNotification 起流</td><td><span class="badge badge-pass">通过</span></td><td></td></tr>
 <tr><td>ASYNC-FUNC-009</td><td>asyncStopDataNotification 停流</td><td><span class="badge badge-pass">通过</span></td><td></td></tr>
 <tr><td>ASYNC-FUNC-010</td><td>async 与 sync 混合调用状态一致</td><td><span class="badge badge-fail">失败</span></td><td>问题 7107：asyncConnect 后同步接口全部失效</td></tr>
-<tr><td>ASYNC-FUNC-011</td><td>asyncMultiStartDataNotification 同步起流</td><td><span class="badge badge-pending">待测试</span></td><td>需 ≥2 台设备</td></tr>
-<tr><td>ASYNC-FUNC-012</td><td>asyncMultiStopDataNotification 同步停流</td><td><span class="badge badge-pending">待测试</span></td><td>需 ≥2 台设备</td></tr>
+<tr><td>ASYNC-FUNC-011</td><td>asyncMultiStartDataNotification 同步起流</td><td><span class="badge badge-pass">通过</span></td><td></td></tr>
+<tr><td>ASYNC-FUNC-012</td><td>asyncMultiStopDataNotification 同步停流</td><td><span class="badge badge-pass">通过</span></td><td></td></tr>
 </table>
 </section>
 
@@ -339,7 +339,7 @@
 
 <div class="footer">
   <p>OYWW1100 传感器 SDK 测试报告 | SDK 0.9.1 | 固件 1.0.3 | 生成于 2026-08-21</p>
-  <p>测试用例总数: 109（含 4 不适用 + 1 跳过）| 可执行: 104 | 已执行: 99 | 通过: 77 | 失败: 22 | 待测试: 4 | 无法执行: 1</p>
+  <p>测试用例总数: 109（含 4 不适用 + 1 跳过）| 可执行: 104 | 已执行: 103 | 通过: 80 | 失败: 23 | 待测试: 0 | 无法执行: 1</p>
 </div>
 
 </div>

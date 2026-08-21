@@ -124,15 +124,15 @@ async def main_async():
             continue
 
         # connect
-        print(f"\n[连接] [{tag}] SensorProfile.connect() ...", flush=True)
+        print(f"\n[连接] [{tag}] await SensorProfile.asyncConnect() ...", flush=True)
         try:
-            conn_ok = sensor.connect()
+            conn_ok = await sensor.asyncConnect()
         except Exception as e:
             conn_ok = False
             print(f"[连接] [{tag}] 抛异常 {type(e).__name__}: {e}", flush=True)
-        print(f"[连接] [{tag}] connect() -> {conn_ok}", flush=True)
-        record(results, f"[{tag}] connect 返回 True", conn_ok is True,
-               "connect() 返回 True", f"connect() -> {conn_ok}")
+        print(f"[连接] [{tag}] asyncConnect() -> {conn_ok}", flush=True)
+        record(results, f"[{tag}] asyncConnect 返回 True", conn_ok is True,
+               "asyncConnect() 返回 True", f"asyncConnect() -> {conn_ok}")
 
         # 等待 Ready
         t0 = time.time()
@@ -148,15 +148,15 @@ async def main_async():
             continue
 
         # init
-        print(f"[init] [{tag}] SensorProfile.init(20, 1000) ...", flush=True)
+        print(f"[init] [{tag}] await SensorProfile.asyncInit(20, 1000) ...", flush=True)
         try:
-            init_ok = sensor.init(20, 1000)
+            init_ok = await sensor.asyncInit(20, 1000)
         except Exception as e:
             init_ok = False
             print(f"[init] [{tag}] 抛异常 {type(e).__name__}: {e}", flush=True)
-        print(f"[init] [{tag}] init(20, 1000) -> {init_ok}", flush=True)
-        record(results, f"[{tag}] init 返回 True", init_ok is True,
-               "init(20, 1000) 返回 True", f"init() -> {init_ok}")
+        print(f"[init] [{tag}] asyncInit(20, 1000) -> {init_ok}", flush=True)
+        record(results, f"[{tag}] asyncInit 返回 True", init_ok is True,
+               "asyncInit(20, 1000) 返回 True", f"asyncInit() -> {init_ok}")
 
         sensors.append((tag, sensor))
 
@@ -165,7 +165,7 @@ async def main_async():
         # 清理
         for tag, sensor in sensors:
             try:
-                sensor.disconnect()
+                await sensor.asyncDisconnect()
             except Exception:
                 pass
         print("\n结论: SKIP", flush=True)
@@ -211,7 +211,7 @@ async def main_async():
     # 断开所有
     for tag, sensor in sensors:
         try:
-            sensor.disconnect()
+            await sensor.asyncDisconnect()
         except Exception as e:
             print(f"[断开] [{tag}] 抛异常 {type(e).__name__}: {e}", flush=True)
 
