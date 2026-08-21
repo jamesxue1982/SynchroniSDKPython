@@ -48,6 +48,10 @@
   .bug-table { margin-top: 12px; }
   .bug-table td:first-child { font-family: monospace; font-weight: 600; }
   .bug-table td:nth-child(2) { color: #e53e3e; font-weight: 500; }
+  .sev-high { background: #fee2e2; }
+  .sev-medium { background: #fef9c3; }
+  .bug-table a { color: #2b6cb0; text-decoration: none; }
+  .bug-table a:hover { text-decoration: underline; }
   .footer { text-align: center; color: #a0aec0; font-size: 12px; margin-top: 32px; padding: 16px; }
   .module-toc { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
   .module-toc a { text-decoration: none; font-size: 13px; padding: 4px 10px; border-radius: 4px; background: #edf2f7; color: #4a5568; }
@@ -313,27 +317,27 @@
 <h2>Bug 汇总 <span class="count">18 个问题</span></h2>
 <table class="bug-table">
 <tr><th>Bug ID</th><th>严重程度</th><th>关联用例</th><th>问题描述</th></tr>
-<tr><td>7060</td><td>中</td><td>CTRL-FUNC-001</td><td>蓝牙未开启时 isEnable 与 startScan 校验不完整</td></tr>
-<tr><td>7061</td><td>中</td><td>CTRL-FUNC-002</td><td>onEnableCallback 在蓝牙开关切换时不触发</td></tr>
-<tr><td>7064</td><td>中</td><td>CTRL-FUNC-007</td><td>requireSensor 对无效输入处理不当</td></tr>
-<tr><td>7065</td><td>低</td><td>CTRL-FUNC-010</td><td>getBLEBackendName 返回值与后端配置不一致</td></tr>
-<tr><td>7066</td><td>中</td><td>CTRL-BND-001</td><td>startScan 边界参数缺少输入校验</td></tr>
-<tr><td>7067</td><td>高</td><td>DEV-SM-002</td><td>connect 失败时未返回 False 且无错误回调</td></tr>
-<tr><td>7068</td><td>高</td><td>DEV-SM-008</td><td>autoReconnect=True 异常断链后无法自动恢复</td></tr>
-<tr><td>7087</td><td>中</td><td>DEV-SM-010</td><td>onAutoReconnect 自定义恢复回调不生效</td></tr>
-<tr><td>7088</td><td>高</td><td>DEV-SM-012</td><td>突然断电/超范围未触发 Disconnected 与错误回调</td></tr>
-<tr><td>7069</td><td>中</td><td>DATA-FUNC-005</td><td>各 DataType 数据流逐模态验证未完成</td></tr>
-<tr><td>7089</td><td>中</td><td>DATA-FUNC-007/013</td><td>channelSamples 存在重复 sampleIndex；Sample 新增字段与访问器不一致</td></tr>
-<tr><td>7090</td><td>中</td><td>DATA-FUNC-009</td><td>每批样本数与 packageSampleCount 偏差过大</td></tr>
-<tr><td>7092</td><td>中</td><td>DATA-BND-001</td><td>init packageSampleCount 边界参数缺少输入校验</td></tr>
-<tr><td>7095</td><td>中</td><td>DATA-BND-002</td><td>init powerRefreshInterval 边界参数缺少输入校验</td></tr>
-<tr><td>7096/7097</td><td>高</td><td>DATA-PERF-001</td><td>实测采样率与标称偏差超过容差；getSampleRate 返回名义值不准确</td></tr>
-<tr><td>7101</td><td>高</td><td>BIN-FUNC-009</td><td>回放还原的 startTimeStamp/delay 与实收不一致</td></tr>
-<tr><td>7105</td><td>中</td><td>LOG-FUNC-002</td><td>setLogPath 未校验路径类型，传入已存在文件未抛异常</td></tr>
-<tr><td>7073</td><td>高</td><td>HW-MAN-003</td><td>快速重启后设备状态异常，无法使用</td></tr>
-<tr style="background:#fff5f5"><td><strong>7106</strong></td><td><strong>高</strong></td><td><strong>ASYNC-FUNC-005/006</strong></td><td><strong>asyncSetParam 返回虚假 OK（底层未生效）；asyncGetParam 返回硬编码默认值而非设备真实参数；setParam 同步接口也返回 None</strong></td></tr>
-<tr style="background:#fff5f5"><td><strong>7107</strong></td><td><strong>高</strong></td><td><strong>ASYNC-FUNC-010</strong></td><td><strong>asyncConnect 后同步路径状态不共享：init/startDataNotification/disconnect 全部返回 None 或不生效</strong></td></tr>
-<tr style="background:#fff5f5"><td><strong>7110</strong></td><td><strong>高</strong></td><td><strong>MULTI-FUNC-008</strong></td><td><strong>bumble 后端强制切换失败：SENSOR_SDK_BLE_BACKEND=bumble 不生效，SensorController.getBLEBackendName() 始终返回 bleak</strong></td></tr>
+<tr class="sev-high"><td><a href="https://redmine.oymotion.com/issues/7067">7067</a></td><td>高</td><td>DEV-SM-002</td><td>connect 失败时未返回 False 且无错误回调</td></tr>
+<tr class="sev-high"><td><a href="https://redmine.oymotion.com/issues/7068">7068</a></td><td>高</td><td>DEV-SM-008</td><td>autoReconnect=True 异常断链后无法自动恢复</td></tr>
+<tr class="sev-high"><td><a href="https://redmine.oymotion.com/issues/7073">7073</a></td><td>高</td><td>HW-MAN-003</td><td>快速重启后设备状态异常，无法使用</td></tr>
+<tr class="sev-high"><td><a href="https://redmine.oymotion.com/issues/7088">7088</a></td><td>高</td><td>DEV-SM-012</td><td>突然断电/超范围未触发 Disconnected 与错误回调</td></tr>
+<tr class="sev-high"><td><a href="https://redmine.oymotion.com/issues/7096">7096</a>/<a href="https://redmine.oymotion.com/issues/7097">7097</a></td><td>高</td><td>DATA-PERF-001</td><td>实测采样率与标称偏差超过容差；getSampleRate 返回名义值不准确</td></tr>
+<tr class="sev-high"><td><a href="https://redmine.oymotion.com/issues/7101">7101</a></td><td>高</td><td>BIN-FUNC-009</td><td>回放还原的 startTimeStamp/delay 与实收不一致</td></tr>
+<tr class="sev-high"><td><a href="https://redmine.oymotion.com/issues/7106">7106</a></td><td>高</td><td>ASYNC-FUNC-005/006</td><td>asyncSetParam 返回虚假 OK（底层未生效）；asyncGetParam 返回硬编码默认值而非设备真实参数；setParam 同步接口也返回 None</td></tr>
+<tr class="sev-high"><td><a href="https://redmine.oymotion.com/issues/7107">7107</a></td><td>高</td><td>ASYNC-FUNC-010</td><td>asyncConnect 后同步路径状态不共享：init/startDataNotification/disconnect 全部返回 None 或不生效</td></tr>
+<tr class="sev-high"><td><a href="https://redmine.oymotion.com/issues/7110">7110</a></td><td>高</td><td>MULTI-FUNC-008</td><td>bumble 后端强制切换失败：SENSOR_SDK_BLE_BACKEND=bumble 不生效，SensorController.getBLEBackendName() 始终返回 bleak</td></tr>
+<tr class="sev-medium"><td><a href="https://redmine.oymotion.com/issues/7060">7060</a></td><td>中</td><td>CTRL-FUNC-001</td><td>蓝牙未开启时 isEnable 与 startScan 校验不完整</td></tr>
+<tr class="sev-medium"><td><a href="https://redmine.oymotion.com/issues/7061">7061</a></td><td>中</td><td>CTRL-FUNC-002</td><td>onEnableCallback 在蓝牙开关切换时不触发</td></tr>
+<tr class="sev-medium"><td><a href="https://redmine.oymotion.com/issues/7064">7064</a></td><td>中</td><td>CTRL-FUNC-007</td><td>requireSensor 对无效输入处理不当</td></tr>
+<tr class="sev-medium"><td><a href="https://redmine.oymotion.com/issues/7066">7066</a></td><td>中</td><td>CTRL-BND-001</td><td>startScan 边界参数缺少输入校验</td></tr>
+<tr class="sev-medium"><td><a href="https://redmine.oymotion.com/issues/7069">7069</a></td><td>中</td><td>DATA-FUNC-005</td><td>各 DataType 数据流逐模态验证未完成</td></tr>
+<tr class="sev-medium"><td><a href="https://redmine.oymotion.com/issues/7087">7087</a></td><td>中</td><td>DEV-SM-010</td><td>onAutoReconnect 自定义恢复回调不生效</td></tr>
+<tr class="sev-medium"><td><a href="https://redmine.oymotion.com/issues/7089">7089</a></td><td>中</td><td>DATA-FUNC-007/013</td><td>channelSamples 存在重复 sampleIndex；Sample 新增字段与访问器不一致</td></tr>
+<tr class="sev-medium"><td><a href="https://redmine.oymotion.com/issues/7090">7090</a></td><td>中</td><td>DATA-FUNC-009</td><td>每批样本数与 packageSampleCount 偏差过大</td></tr>
+<tr class="sev-medium"><td><a href="https://redmine.oymotion.com/issues/7092">7092</a></td><td>中</td><td>DATA-BND-001</td><td>init packageSampleCount 边界参数缺少输入校验</td></tr>
+<tr class="sev-medium"><td><a href="https://redmine.oymotion.com/issues/7095">7095</a></td><td>中</td><td>DATA-BND-002</td><td>init powerRefreshInterval 边界参数缺少输入校验</td></tr>
+<tr class="sev-medium"><td><a href="https://redmine.oymotion.com/issues/7105">7105</a></td><td>中</td><td>LOG-FUNC-002</td><td>setLogPath 未校验路径类型，传入已存在文件未抛异常</td></tr>
+<tr><td><a href="https://redmine.oymotion.com/issues/7065">7065</a></td><td>低</td><td>CTRL-FUNC-010</td><td>getBLEBackendName 返回值与后端配置不一致</td></tr>
 </table>
 </section>
 
