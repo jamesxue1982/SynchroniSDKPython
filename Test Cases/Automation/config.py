@@ -35,6 +35,18 @@ DEVICES = [
     },
 
     {
+        "name_prefix": "OBM",
+        "mac": "",
+        "identity": "2046",
+    },
+
+    {
+        "name_prefix": "OBM",
+        "mac": "",
+        "identity": "206F",
+    },
+
+    {
         "name_prefix": "OYWW",
         "mac": "",
         "identity": "80F3",

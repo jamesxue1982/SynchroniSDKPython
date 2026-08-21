@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""sync_upstream.py — 把 upstream 的最新 SDK 代码 / example / README 同步到 Testing_James。
+"""sync_upstream.py — 把 upstream 的最新 SDK 代码 / example / README 同步到本地默认分支。
 
 背景
 ----
@@ -8,23 +8,26 @@
   upstream -> 官方上游（oymotion/SynchroniSDKPython）
 
 测试代码提交在 Testing_James 分支上。当上游发布新版本（如 0.9.2）时，
-需要把上游最新的代码、examples、README 合并进 Testing_James，同时保留测试代码。
-本脚本只操作 Testing_James 分支（测试工作只关注这个分支），不修改 master。
+本脚本只负责把 upstream 的默认分支（master）同步到本地 master，
+不直接操作 Testing_James。之后在 Testing_James 分支上手动执行
+`git merge master`（或 `git merge origin/master`）即可把最新代码/example/README
+合入测试分支，同时保留测试代码。
 
 用法
 ----
-  python sync_upstream.py          # 仅本地同步：fetch upstream + merge 到 Testing_James
-  python sync_upstream.py --push   # 同步成功后，把 Testing_James 推送到 origin
+  python sync_upstream.py          # fetch upstream + merge 到本地 master
+  python sync_upstream.py --push   # 同步成功后，把 master 推送到 origin
 
 流程
 ----
   1. 校验仓库与 upstream remote
   2. git fetch upstream（拉取上游最新）
-  3. 检查工作区干净
-  4. 切到 Testing_James
-  5. git merge upstream/<默认分支>（SDK 代码/example/README 随合并带入）
-  6. 冲突时列出冲突文件并停在冲突状态；否则报告结果
-  7. （可选 --push）git push origin Testing_James
+  3. 确定 upstream 默认分支（master / main）
+  4. 检查工作区干净
+  5. 切到本地 master
+  6. git merge upstream/master（SDK 代码/example/README 随合并带入）
+  7. 冲突时列出冲突文件并停在冲突状态；否则报告结果
+  8. （可选 --push）git push origin master
 """
 
 import argparse
@@ -33,7 +36,6 @@ import subprocess
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TEST_BRANCH = "Testing_James"
 
 
 def git(args):
@@ -58,13 +60,13 @@ def show(r):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="同步 upstream 到 Testing_James")
+    parser = argparse.ArgumentParser(description="同步 upstream 到本地默认分支")
     parser.add_argument("--push", action="store_true",
-                        help="同步成功后推送到 origin/Testing_James")
+                        help="同步成功后推送到 origin/<默认分支>")
     args = parser.parse_args()
 
     print("=" * 60)
-    print("同步 upstream -> Testing_James")
+    print("同步 upstream -> 本地默认分支")
     print(f"仓库根目录: {REPO_ROOT}")
     print("=" * 60)
 
@@ -111,16 +113,16 @@ def main():
         print(r.stdout.strip())
         die("请先 commit 或 stash 后再运行本脚本")
 
-    # 6. 切到 Testing_James
-    print(f"\n[3/5] 切换到 {TEST_BRANCH} ...")
-    r = git(["checkout", TEST_BRANCH])
+    # 6. 切到本地默认分支
+    print(f"\n[3/5] 切换到 {up_branch} ...")
+    r = git(["checkout", up_branch])
     if r.returncode != 0:
         show(r)
-        die(f"切换到 {TEST_BRANCH} 失败")
-    print(f"当前分支: {TEST_BRANCH}")
+        die(f"切换到 {up_branch} 失败")
+    print(f"当前分支: {up_branch}")
 
     # 7. merge upstream
-    print(f"\n[4/5] 合并 upstream/{up_branch} 到 {TEST_BRANCH} ...")
+    print(f"\n[4/5] 合并 upstream/{up_branch} 到 {up_branch} ...")
     before = git(["rev-parse", "HEAD"]).stdout.strip()
     r = git(["merge", f"upstream/{up_branch}"])
     show(r)
@@ -140,14 +142,14 @@ def main():
         sys.exit(1)
 
     if before == after:
-        print("Testing_James 已是最新，无需合并（up-to-date）。")
+        print(f"{up_branch} 已是最新，无需合并（up-to-date）。")
     else:
         print(f"合并完成：{before[:8]} -> {after[:8]}")
 
     # 8. 可选 push
     if args.push:
-        print(f"\n[5/5] 推送 {TEST_BRANCH} 到 origin ...")
-        r = git(["push", "origin", TEST_BRANCH])
+        print(f"\n[5/5] 推送 {up_branch} 到 origin ...")
+        r = git(["push", "origin", up_branch])
         show(r)
         if r.returncode != 0:
             die("push 失败")
