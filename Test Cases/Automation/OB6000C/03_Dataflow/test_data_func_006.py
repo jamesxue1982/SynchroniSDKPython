@@ -6,20 +6,20 @@
 
 流程：
   1) scan -> requireSensor -> connect -> 到达 Ready -> init
-  2) setParam("NTF_EMG", "ON") 起 EMG 流（OB6000C 主模态，静息也有数据）
+  2) setParam("NTF_EEG", "ON") 起 EEG 流（OB6000C 主模态，静息也有数据）
   3) startDataNotification 后采集窗口内等回调，取收到的第一批 SensorData
   4) 对第一批数据逐一校验元数据接口：
-       getDeviceMac / getDataType / getSampleRate / getChannelCount /
+       getDeviceMac / getDeviceName / getDataType / getSampleRate / getChannelCount /
        getChannelMask / getSampleCount / getLostPackageCount /
        getStartTimeStamp / getStartTimeSec / getDelay / isDataValid
      明确断言：getSampleRate>0、getChannelCount>0、getSampleCount>0、
-               getDeviceMac==设备MAC、getDataType==NTF_EMG、isDataValid==True；
+               getDeviceMac==设备MAC、getDataType==NTF_EEG、isDataValid==True；
      其余接口断言"可调用且返回合法值（>=0）"。
 
 说明：
   元数据是上层解析 SensorData 的基础，需至少拿到一批真实数据方可校验。
-  DeviceInfo.ImpeChannelCount=8 但采样率仅 1Hz（约 20s 一批），不适合做元数据源；
-  EMG 采样率 500Hz，数秒内即可多批，故选 EMG。
+  OB6000C 为 EEG 脑电设备，NTF_EEG 是核心数据流，静息/佩戴即有数据且采样率高，
+  数秒内即可多批，故选 EEG。
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
@@ -27,6 +27,7 @@
 """
 
 import os
+import re
 import sys
 import time
 
@@ -54,18 +55,25 @@ def _norm_mac(s):
 
 
 class MetaCollector:
-    """保存收到的第一批 SensorData，用于元数据校验。"""
+    """保存收到的第一批 NTF_EEG SensorData，用于元数据校验。"""
 
     def __init__(self):
         self.first_batch = None
         self.first_batch_samples = 0  # 该批 channelSamples 展开后的样本数（对照证据）
         self.batches = 0
         self.total_samples = 0
+        self.type_counts = {}  # DataType 名称 -> 批数
 
     def on_data(self, sensor, data):
         items = data if isinstance(data, list) else [data]
         for d in items:
             self.batches += 1
+            try:
+                dt = d.getDataType()
+                dt_key = _dt_name(dt)
+            except Exception:
+                dt_key = "?"
+            self.type_counts[dt_key] = self.type_counts.get(dt_key, 0) + 1
             cs = getattr(d, 'channelSamples', None)
             n = 0
             if cs:
@@ -74,8 +82,8 @@ class MetaCollector:
                 except TypeError:
                     n = len(cs)
             self.total_samples += n
-            # 只保存第一个“非空”批次，避免空批/边界批导致 getSampleCount 误判
-            if self.first_batch is None and n > 0:
+            # 只保存第一个“非空”的 NTF_EEG 批次，避免把 IMU 聚合批当成 EEG
+            if self.first_batch is None and n > 0 and dt == DataType.NTF_EEG:
                 self.first_batch = d
                 self.first_batch_samples = n
 
@@ -92,8 +100,8 @@ def check_metadata(data, expect_mac, results, batch_samples):
         dt_txt = _dt_name(dt)
     except Exception as e:
         dt, dt_txt = None, f"<{type(e).__name__}>"
-    add("SensorData.getDataType 匹配起流模态", dt == DataType.NTF_EMG,
-        "getDataType() == DataType.NTF_EMG", f"getDataType() -> {dt_txt}")
+    add("SensorData.getDataType 匹配起流模态", dt == DataType.NTF_EEG,
+        "getDataType() == DataType.NTF_EEG", f"getDataType() -> {dt_txt}")
 
     # getSampleRate
     try:
@@ -172,6 +180,16 @@ def check_metadata(data, expect_mac, results, batch_samples):
     add("SensorData.getDeviceMac 匹配设备 MAC", mac_ok,
         f"getDeviceMac() 规范化后 == 设备 MAC({expect_mac})",
         f"getDeviceMac() -> {mac_txt}")
+
+    # getDeviceName（0.9.5 新增：返回设备名）
+    try:
+        dn = data.getDeviceName()
+        dn_txt = str(dn)
+    except Exception as e:
+        dn, dn_txt = None, f"<{type(e).__name__}>"
+    dn_ok = (isinstance(dn, str) and dn.strip() != "")
+    add("SensorData.getDeviceName 返回非空设备名", dn_ok,
+        "getDeviceName() 返回非空字符串", f"getDeviceName() -> {dn_txt!r}")
 
     # isDataValid
     try:
@@ -280,15 +298,22 @@ def main():
     print(f"[init] SensorProfile.init() -> {init_txt}", flush=True)
     record(results, "SensorProfile.init 返回 True", iret is True, "init() 返回 True", f"init() -> {init_txt}")
 
-    # 起 EMG 流
-    print("\n[起流] SensorProfile.setParam('NTF_EMG', 'ON') ...", flush=True)
+    # 起 EEG 流
+    print("\n[起流] SensorProfile.setParam('NTF_EEG', 'ON') ...", flush=True)
     try:
-        p_ret = sensor.setParam("NTF_EMG", "ON")
+        p_ret = sensor.setParam("NTF_EEG", "ON")
         p_txt = f"返回 {p_ret!r}"
     except Exception as e:
         p_ret = None
         p_txt = f"抛异常 {type(e).__name__}: {e}"
-    print(f"[起流] setParam('NTF_EMG', 'ON') -> {p_txt}", flush=True)
+    print(f"[起流] setParam('NTF_EEG', 'ON') -> {p_txt}", flush=True)
+
+    # 诊断：读取实际 NTF 开关，确认 EEG/IMU 起流状态
+    try:
+        ntf_state = sensor.getParam("NTF")
+        print(f"[诊断] getParam('NTF') -> {ntf_state!r}", flush=True)
+    except Exception as e:
+        print(f"[诊断] getParam('NTF') 抛异常 {type(e).__name__}: {e}", flush=True)
 
     collector = MetaCollector()
     sensor.onDataCallback = collector.on_data
@@ -308,17 +333,19 @@ def main():
     print(f"\n[采集] 等待 {config.COLLECT_SECONDS}s 观察 onDataCallback ...", flush=True)
     time.sleep(config.COLLECT_SECONDS)
     print(f"[采集] 收到批数={collector.batches} 样本数={collector.total_samples}", flush=True)
+    print(f"[采集] 各类型批数={collector.type_counts}", flush=True)
 
     first = collector.first_batch
     if first is None:
-        record(results, "采集窗口内收到至少一批 SensorData", False,
-               "onDataCallback 收到 >=1 批数据", f"批数={collector.batches} 样本数={collector.total_samples}")
-        print("[FAIL] 未收到任何 SensorData 批次，无法校验元数据", flush=True)
+        record(results, "采集窗口内收到至少一批 NTF_EEG SensorData", False,
+               "onDataCallback 收到 >=1 批 NTF_EEG 数据",
+               f"批数={collector.batches} 样本数={collector.total_samples} 各类型={collector.type_counts}")
+        print("[FAIL] 未收到 NTF_EEG 批次，无法校验 EEG 元数据（各类型批数见上）", flush=True)
     else:
-        record(results, "采集窗口内收到至少一批 SensorData", True,
-               "onDataCallback 收到 >=1 批数据",
-               f"批数={collector.batches} 样本数={collector.total_samples}")
-        print(f"\n[校验] 对收到的第一批（非空）SensorData 逐项校验元数据接口 "
+        record(results, "采集窗口内收到至少一批 NTF_EEG SensorData", True,
+               "onDataCallback 收到 >=1 批 NTF_EEG 数据",
+               f"批数={collector.batches} 样本数={collector.total_samples} 各类型={collector.type_counts}")
+        print(f"\n[校验] 对收到的第一批（非空）NTF_EEG SensorData 逐项校验元数据接口 "
               f"(该批 channelSamples 展开样本数={collector.first_batch_samples}) ...", flush=True)
         check_metadata(first, addr, results, collector.first_batch_samples)
 
@@ -328,7 +355,7 @@ def main():
     except Exception:
         pass
     try:
-        sensor.setParam("NTF_EMG", "OFF")
+        sensor.setParam("NTF_EEG", "OFF")
     except Exception:
         pass
     try:

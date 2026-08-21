@@ -191,7 +191,7 @@ def main():
         print(f"[setParam] NTF_EEG ON 抛异常 {type(e).__name__}: {e}", flush=True)
 
     # 对每个采样率逐一测试
-    collector = Collector()
+    collector = RateCollector()
     sensor.onDataCallback = collector.on_data
     rate_results = []
 
