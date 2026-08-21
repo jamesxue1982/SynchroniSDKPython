@@ -13,7 +13,7 @@
   2) scan 匹配 OB6000C -> requireSensor
   3) await sensor.asyncConnect() -> 到达 Ready
   4) await sensor.asyncInit(20, 1000)
-  5) 先用同步 setParam("NTF_EMG", "ON") 设置一个确定值
+  5) 先用同步 setParam("NTF_EEG", "ON") 设置一个确定值
   6) await sensor.asyncGetParam("NTF") -> 与同步 sensor.getParam("NTF") 比较
   7) 两者应一致
 """
@@ -134,10 +134,10 @@ async def main_async():
            "asyncInit(20, 1000) 返回 True", f"asyncInit() -> {ok_init}")
 
     # 先用同步 setParam 设置一个确定值
-    print("\n[同步设置] sensor.setParam('NTF_EMG', 'ON') ...", flush=True)
+    print("\n[同步设置] sensor.setParam('NTF_EEG', 'ON') ...", flush=True)
     try:
-        set_r = sensor.setParam("NTF_EMG", "ON")
-        print(f"[同步设置] sensor.setParam('NTF_EMG', 'ON') -> {set_r!r}", flush=True)
+        set_r = sensor.setParam("NTF_EEG", "ON")
+        print(f"[同步设置] sensor.setParam('NTF_EEG', 'ON') -> {set_r!r}", flush=True)
     except Exception as e:
         set_r = None
         print(f"[同步设置] 抛异常 {type(e).__name__}: {e}", flush=True)
@@ -169,7 +169,7 @@ async def main_async():
 
     # 清理：恢复 OFF
     try:
-        sensor.setParam("NTF_EMG", "OFF")
+        sensor.setParam("NTF_EEG", "OFF")
     except Exception:
         pass
 

@@ -11,9 +11,9 @@
 流程：
   1) 人工确认待测设备已开机 -> 按回车
   2) 检查 SensorController.isEnable == True
-  3) scan -> 断言返回 list 且含 OYWW 设备
-  4) 断言 OYWW 设备的 Address 非空、RSSI 非空
-  5) asyncScan -> 断言返回 list 且含 OYWW 设备
+  3) scan -> 断言返回 list 且含 OB6000C 设备
+  4) 断言 OB6000C 设备的 Address 非空、RSSI 非空
+  5) asyncScan -> 断言返回 list 且含 OB6000C 设备
 """
 
 import asyncio
@@ -36,11 +36,11 @@ def _desc(d):
     return f"{name} {addr} RSSI={rssi}"
 
 
-def _find_oyww(devices):
-    """返回第一台 Name 以 OYWW 开头的设备，无则 None。"""
+def _find_ob6000c(devices):
+    """返回第一台 Name 以 OB6000C 开头的设备，无则 None。"""
     for d in devices:
         name = getattr(d, 'Name', None) or ''
-        if name.upper().startswith('OYWW'):
+        if name.upper().startswith('OB6000C'):
             return d
     return None
 
@@ -87,27 +87,27 @@ def main():
         print(f"[扫描] 发现 {len(devices)} 台设备:", flush=True)
         for d in devices:
             print(f"  - {_desc(d)}", flush=True)
-        target = _find_oyww(devices)
+        target = _find_ob6000c(devices)
     else:
         target = None
 
     if target is None:
-        print("[检查2] 未发现 Name 以 OYWW 开头的设备", flush=True)
-        record(results, "SensorController.scan 含 OYWW 设备", False,
-               "scan 结果含 Name 以 OYWW 开头的设备", "未发现 OYWW 设备")
+        print("[检查2] 未发现 Name 以 OB6000C 开头的设备", flush=True)
+        record(results, "SensorController.scan 含 OB6000C 设备", False,
+               "scan 结果含 Name 以 OB6000C 开头的设备", "未发现 OB6000C 设备")
     else:
-        print(f"[检查2] 发现 OYWW 设备: {_desc(target)}", flush=True)
-        record(results, "SensorController.scan 含 OYWW 设备", True,
-               "scan 结果含 Name 以 OYWW 开头的设备", f"发现 {getattr(target, 'Name', '?')}")
+        print(f"[检查2] 发现 OB6000C 设备: {_desc(target)}", flush=True)
+        record(results, "SensorController.scan 含 OB6000C 设备", True,
+               "scan 结果含 Name 以 OB6000C 开头的设备", f"发现 {getattr(target, 'Name', '?')}")
 
         addr = getattr(target, 'Address', None)
-        print(f"[检查3] OYWW 设备 Address = {addr!r}", flush=True)
-        record(results, "OYWW 设备 Address 非空", bool(addr),
+        print(f"[检查3] OB6000C 设备 Address = {addr!r}", flush=True)
+        record(results, "OB6000C 设备 Address 非空", bool(addr),
                "Address 非空", f"Address={addr!r}")
 
         rssi = getattr(target, 'RSSI', None)
-        print(f"[检查4] OYWW 设备 RSSI = {rssi!r}", flush=True)
-        record(results, "OYWW 设备 RSSI 非空", rssi is not None,
+        print(f"[检查4] OB6000C 设备 RSSI = {rssi!r}", flush=True)
+        record(results, "OB6000C 设备 RSSI 非空", rssi is not None,
                "RSSI 非空", f"RSSI={rssi!r}")
 
     # ---- asyncScan ----
@@ -119,12 +119,12 @@ def main():
         print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
 
     is_list_async = isinstance(devices_async, list)
-    has_oyww_async = bool(_find_oyww(devices_async)) if is_list_async else False
-    print(f"[检查5] SensorController.asyncScan 返回类型 = {type(devices_async).__name__}, 含 OYWW = {has_oyww_async}", flush=True)
-    record(results, "SensorController.asyncScan 返回 list 且含 OYWW 设备",
-           is_list_async and has_oyww_async,
-           "asyncScan 返回 list 且含 OYWW 设备",
-           f"返回类型 {type(devices_async).__name__}, 含 OYWW={has_oyww_async}")
+    has_ob6000c_async = bool(_find_ob6000c(devices_async)) if is_list_async else False
+    print(f"[检查5] SensorController.asyncScan 返回类型 = {type(devices_async).__name__}, 含 OB6000C = {has_ob6000c_async}", flush=True)
+    record(results, "SensorController.asyncScan 返回 list 且含 OB6000C 设备",
+           is_list_async and has_ob6000c_async,
+           "asyncScan 返回 list 且含 OB6000C 设备",
+           f"返回类型 {type(devices_async).__name__}, 含 OB6000C={has_ob6000c_async}")
 
     # ---- 汇总 ----
     print("\n" + "=" * 60, flush=True)

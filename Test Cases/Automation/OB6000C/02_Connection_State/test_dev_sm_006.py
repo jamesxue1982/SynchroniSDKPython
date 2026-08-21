@@ -94,7 +94,7 @@ PROBE = (
     "except Exception as e:\n"
     "    print('INIT_RAISED=' + type(e).__name__, flush=True)\n"
     "try:\n"
-    "    print('SET_RET=' + str(sensor.setParam('NTF_EMG', 'ON')), flush=True)\n"
+    "    print('SET_RET=' + str(sensor.setParam('NTF_EEG', 'ON')), flush=True)\n"
     "except Exception as e:\n"
     "    print('SET_RAISED=' + type(e).__name__, flush=True)\n"
     "try:\n"

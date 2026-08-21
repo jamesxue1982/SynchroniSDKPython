@@ -14,7 +14,7 @@
   3) 注册 SensorController.onDeviceFoundCallback，断言 hasDeviceFoundCallback==True
   4) startScan(3000) -> 断言返回 True
   5) 等待约 2~3 个周期，断言回调周期触发（约每 3s 一次）
-  6) 断言回调列表含 OYWW 设备
+  6) 断言回调列表含 OB6000C 设备
   7) 连接设备后，断言已连接设备不再重复推送
 """
 
@@ -39,10 +39,10 @@ def _desc(d):
     return f"{name} {addr}"
 
 
-def _find_oyww(devices):
+def _find_ob6000c(devices):
     for d in devices or []:
         name = getattr(d, 'Name', None) or ''
-        if name.upper().startswith('OYWW'):
+        if name.upper().startswith('OB6000C'):
             return d
     return None
 
@@ -126,11 +126,11 @@ def main():
     record(results, "onDeviceFoundCallback 周期触发（约每 3s 一次）", ok_period,
            "约每 3s 触发一次（触发>=2次，间隔 2~4s）", f"触发 {n} 次，间隔={intervals}")
 
-    # 检查4：回调列表含 OYWW 设备
-    has_oyww = any(any(nm.upper().startswith('OYWW') for nm in names) for _, names in found_events)
-    print(f"[检查4] 回调列表含 OYWW 设备 = {has_oyww}", flush=True)
-    record(results, "onDeviceFoundCallback 列表含 OYWW 设备", has_oyww,
-           "回调列表含 Name 以 OYWW 开头的设备", f"含 OYWW={has_oyww}")
+    # 检查4：回调列表含 OB6000C 设备
+    has_ob6000c = any(any(nm.upper().startswith('OB6000C') for nm in names) for _, names in found_events)
+    print(f"[检查4] 回调列表含 OB6000C 设备 = {has_ob6000c}", flush=True)
+    record(results, "onDeviceFoundCallback 列表含 OB6000C 设备", has_ob6000c,
+           "回调列表含 Name 以 OB6000C 开头的设备", f"含 OB6000C={has_ob6000c}")
 
     # 检查5：连接后已连接设备不重复推送
     print(f"\n[连接] SensorController.scan({config.SCAN_TIMEOUT_MS}) 获取设备 ...", flush=True)
@@ -139,19 +139,19 @@ def main():
     except Exception as e:
         devices = None
         print(f"[连接] scan 抛异常 {type(e).__name__}: {e}", flush=True)
-    target = _find_oyww(devices)
+    target = _find_ob6000c(devices)
 
     if target is None:
-        print("[检查5] 未发现 OYWW 设备，跳过“已连接设备不重复推送”检查", flush=True)
+        print("[检查5] 未发现 OB6000C 设备，跳过“已连接设备不重复推送”检查", flush=True)
         record(results, "已连接设备不重复推送", False,
-               "连接 OYWW 后回调不再含该设备", "未发现 OYWW 设备，未执行连接")
+               "连接 OB6000C 后回调不再含该设备", "未发现 OB6000C 设备，未执行连接")
     else:
         name = getattr(target, 'Name', '?')
         sensor = ctrl.requireSensor(target)
         if sensor is None:
             print("[检查5] requireSensor 返回 None，跳过", flush=True)
             record(results, "已连接设备不重复推送", False,
-                   "连接 OYWW 后回调不再含该设备", "requireSensor 返回 None")
+                   "连接 OB6000C 后回调不再含该设备", "requireSensor 返回 None")
         else:
             try:
                 ok = sensor.connect()
@@ -163,7 +163,7 @@ def main():
             if not ok:
                 print("[检查5] 连接失败，跳过", flush=True)
                 record(results, "已连接设备不重复推送", False,
-                       "连接 OYWW 后回调不再含该设备", f"connect 返回 {ok}")
+                       "连接 OB6000C 后回调不再含该设备", f"connect 返回 {ok}")
             else:
                 time.sleep(1)
                 found_events.clear()
@@ -180,10 +180,10 @@ def main():
                     print(f"[检查] SensorController.stopScan 抛异常 {stop_err}", flush=True)
                 record(results, "SensorController.stopScan 不抛异常（检查5内）", not stop_raised,
                        "SensorController.stopScan 不抛异常", f"抛异常 {stop_err}" if stop_raised else "无异常")
-                still_contains = any(any(nm.upper().startswith('OYWW') for nm in names) for _, names in found_events)
-                print(f"[检查5] 连接后回调仍含 OYWW = {still_contains}（预期 False）", flush=True)
+                still_contains = any(any(nm.upper().startswith('OB6000C') for nm in names) for _, names in found_events)
+                print(f"[检查5] 连接后回调仍含 OB6000C = {still_contains}（预期 False）", flush=True)
                 record(results, "已连接设备不重复推送", not still_contains,
-                       "连接 OYWW 后回调不再含该设备", f"连接后回调含 OYWW={still_contains}")
+                       "连接 OB6000C 后回调不再含该设备", f"连接后回调含 OB6000C={still_contains}")
                 try:
                     sensor.disconnect()
                 except Exception as e:

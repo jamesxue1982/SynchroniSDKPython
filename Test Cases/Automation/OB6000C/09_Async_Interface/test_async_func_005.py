@@ -13,10 +13,10 @@
   2) scan 匹配 OB6000C -> requireSensor
   3) await sensor.asyncConnect() -> 到达 Ready
   4) await sensor.asyncInit(20, 1000)
-  5) await sensor.asyncSetParam("NTF_EMG", "ON") -> 断言返回 "OK"
-  6) 同步 getParam("NTF") 校验 -> 应包含 "EMG"
-  7) await sensor.asyncSetParam("NTF_EMG", "OFF") -> 断言返回 "OK"
-  8) 同步 getParam("NTF") 校验 -> EMG 应为 OFF
+  5) await sensor.asyncSetParam("NTF_EEG", "ON") -> 断言返回 "OK"
+  6) 同步 getParam("NTF") 校验 -> 应包含 "EEG"
+  7) await sensor.asyncSetParam("NTF_EEG", "OFF") -> 断言返回 "OK"
+  8) 同步 getParam("NTF") 校验 -> EEG 应为 OFF
 """
 
 import asyncio
@@ -155,14 +155,14 @@ async def main_async():
            "asyncInit(20, 1000) 返回 True", f"asyncInit() -> {ok_init}")
 
     # ---- asyncSetParam ON ----
-    print("\n[异步设置-ON] await sensor.asyncSetParam('NTF_EMG', 'ON') ...", flush=True)
+    print("\n[异步设置-ON] await sensor.asyncSetParam('NTF_EEG', 'ON') ...", flush=True)
     try:
-        r_on = await sensor.asyncSetParam("NTF_EMG", "ON")
+        r_on = await sensor.asyncSetParam("NTF_EEG", "ON")
     except Exception as e:
         r_on = f"抛异常 {type(e).__name__}: {e}"
         print(f"[异步设置-ON] 抛异常 {type(e).__name__}: {e}", flush=True)
-    print(f"[异步设置-ON] sensor.asyncSetParam('NTF_EMG', 'ON') -> {r_on!r}", flush=True)
-    record(results, "asyncSetParam('NTF_EMG', 'ON') 返回 'OK'", r_on == "OK",
+    print(f"[异步设置-ON] sensor.asyncSetParam('NTF_EEG', 'ON') -> {r_on!r}", flush=True)
+    record(results, "asyncSetParam('NTF_EEG', 'ON') 返回 'OK'", r_on == "OK",
            "asyncSetParam 返回 'OK'", f"asyncSetParam() -> {r_on!r}")
 
     # 同步 getParam 验证 ON
@@ -173,21 +173,21 @@ async def main_async():
         ntf_str_on = ""
         print(f"[同步验证-ON] 抛异常 {type(e).__name__}: {e}", flush=True)
     ntf_on = _parse_pipe(ntf_str_on)
-    v_on = ntf_on.get("NTF_EMG", "<缺失>")
+    v_on = ntf_on.get("NTF_EEG", "<缺失>")
     print(f"[同步验证-ON] getParam('NTF') 原始字符串: {ntf_str_on!r}", flush=True)
-    print(f"[同步验证-ON] getParam('NTF') 中 NTF_EMG = {v_on}", flush=True)
-    record(results, "getParam('NTF') 中 NTF_EMG 为 ON", v_on == "ON",
-           "NTF_EMG == 'ON'", f"NTF_EMG = {v_on!r}")
+    print(f"[同步验证-ON] getParam('NTF') 中 NTF_EEG = {v_on}", flush=True)
+    record(results, "getParam('NTF') 中 NTF_EEG 为 ON", v_on == "ON",
+           "NTF_EEG == 'ON'", f"NTF_EEG = {v_on!r}")
 
     # ---- asyncSetParam OFF ----
-    print("\n[异步设置-OFF] await sensor.asyncSetParam('NTF_EMG', 'OFF') ...", flush=True)
+    print("\n[异步设置-OFF] await sensor.asyncSetParam('NTF_EEG', 'OFF') ...", flush=True)
     try:
-        r_off = await sensor.asyncSetParam("NTF_EMG", "OFF")
+        r_off = await sensor.asyncSetParam("NTF_EEG", "OFF")
     except Exception as e:
         r_off = f"抛异常 {type(e).__name__}: {e}"
         print(f"[异步设置-OFF] 抛异常 {type(e).__name__}: {e}", flush=True)
-    print(f"[异步设置-OFF] sensor.asyncSetParam('NTF_EMG', 'OFF') -> {r_off!r}", flush=True)
-    record(results, "asyncSetParam('NTF_EMG', 'OFF') 返回 'OK'", r_off == "OK",
+    print(f"[异步设置-OFF] sensor.asyncSetParam('NTF_EEG', 'OFF') -> {r_off!r}", flush=True)
+    record(results, "asyncSetParam('NTF_EEG', 'OFF') 返回 'OK'", r_off == "OK",
            "asyncSetParam 返回 'OK'", f"asyncSetParam() -> {r_off!r}")
 
     # 同步 getParam 验证 OFF
@@ -198,21 +198,21 @@ async def main_async():
         ntf_str_off = ""
         print(f"[同步验证-OFF] 抛异常 {type(e).__name__}: {e}", flush=True)
     ntf_off = _parse_pipe(ntf_str_off)
-    v_off = ntf_off.get("NTF_EMG", "<缺失>")
+    v_off = ntf_off.get("NTF_EEG", "<缺失>")
     print(f"[同步验证-OFF] getParam('NTF') 原始字符串: {ntf_str_off!r}", flush=True)
-    print(f"[同步验证-OFF] getParam('NTF') 中 NTF_EMG = {v_off}", flush=True)
-    record(results, "getParam('NTF') 中 NTF_EMG 为 OFF（不在通知掩码中）", v_off != "ON",
-           "NTF_EMG 不在通知掩码中（OFF 后 key 被移除）", f"NTF_EMG = {v_off!r}")
+    print(f"[同步验证-OFF] getParam('NTF') 中 NTF_EEG = {v_off}", flush=True)
+    record(results, "getParam('NTF') 中 NTF_EEG 为 OFF（不在通知掩码中）", v_off != "ON",
+           "NTF_EEG 不在通知掩码中（OFF 后 key 被移除）", f"NTF_EEG = {v_off!r}")
 
     # ---- 同步 setParam 对比验证 ----
-    print("\n[同步对比] 用同步 setParam 重新设置 NTF_EMG=ON 并验证 ...", flush=True)
+    print("\n[同步对比] 用同步 setParam 重新设置 NTF_EEG=ON 并验证 ...", flush=True)
     try:
-        r_sync = sensor.setParam("NTF_EMG", "ON")
-        print(f"[同步对比] setParam('NTF_EMG', 'ON') -> {r_sync!r}", flush=True)
+        r_sync = sensor.setParam("NTF_EEG", "ON")
+        print(f"[同步对比] setParam('NTF_EEG', 'ON') -> {r_sync!r}", flush=True)
     except Exception as e:
         r_sync = f"抛异常 {type(e).__name__}: {e}"
         print(f"[同步对比] 抛异常 {type(e).__name__}: {e}", flush=True)
-    record(results, "同步 setParam('NTF_EMG', 'ON') 返回 'OK'", r_sync == "OK",
+    record(results, "同步 setParam('NTF_EEG', 'ON') 返回 'OK'", r_sync == "OK",
            "setParam 返回 'OK'", f"setParam() -> {r_sync!r}")
 
     try:
@@ -220,11 +220,11 @@ async def main_async():
     except Exception as e:
         ntf_sync = ""
     parsed_sync = _parse_pipe(ntf_sync)
-    v_sync = parsed_sync.get("NTF_EMG", "<缺失>")
+    v_sync = parsed_sync.get("NTF_EEG", "<缺失>")
     print(f"[同步对比] getParam('NTF') 原始字符串: {ntf_sync!r}", flush=True)
-    print(f"[同步对比] getParam('NTF') 中 NTF_EMG = {v_sync}", flush=True)
-    record(results, "同步 setParam 后 getParam('NTF') 中 NTF_EMG 为 ON", v_sync == "ON",
-           "NTF_EMG == 'ON'", f"NTF_EMG = {v_sync!r}")
+    print(f"[同步对比] getParam('NTF') 中 NTF_EEG = {v_sync}", flush=True)
+    record(results, "同步 setParam 后 getParam('NTF') 中 NTF_EEG 为 ON", v_sync == "ON",
+           "NTF_EEG == 'ON'", f"NTF_EEG = {v_sync!r}")
 
     # 清理
     try:

@@ -6,7 +6,7 @@
 
 流程：
   1) scan -> requireSensor -> connect -> 到达 Ready -> init
-  2) setParam("NTF_EMG", "ON") 起 EMG 流
+  2) setParam("NTF_EEG", "ON") 起 EEG 流
   3) startDataNotification 后采集窗口内取第一个非空批次 SensorData
   4) 校验 clone()：
      - clone() 返回 SensorData 实例，且与原对象不是同一引用
@@ -312,15 +312,15 @@ def main():
     print(f"[init] SensorProfile.init() -> {init_txt}", flush=True)
     record(results, "SensorProfile.init 返回 True", iret is True, "init() 返回 True", f"init() -> {init_txt}")
 
-    # 起 EMG 流
-    print("\n[起流] SensorProfile.setParam('NTF_EMG', 'ON') ...", flush=True)
+    # 起 EEG 流
+    print("\n[起流] SensorProfile.setParam('NTF_EEG', 'ON') ...", flush=True)
     try:
-        p_ret = sensor.setParam("NTF_EMG", "ON")
+        p_ret = sensor.setParam("NTF_EEG", "ON")
         p_txt = f"返回 {p_ret!r}"
     except Exception as e:
         p_ret = None
         p_txt = f"抛异常 {type(e).__name__}: {e}"
-    print(f"[起流] setParam('NTF_EMG', 'ON') -> {p_txt}", flush=True)
+    print(f"[起流] setParam('NTF_EEG', 'ON') -> {p_txt}", flush=True)
 
     collector = BatchCollector()
     sensor.onDataCallback = collector.on_data
@@ -347,7 +347,7 @@ def main():
     except Exception:
         pass
     try:
-        sensor.setParam("NTF_EMG", "OFF")
+        sensor.setParam("NTF_EEG", "OFF")
     except Exception:
         pass
 

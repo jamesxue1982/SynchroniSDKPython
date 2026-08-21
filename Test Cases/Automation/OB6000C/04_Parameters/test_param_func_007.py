@@ -6,7 +6,7 @@
 
 流程：
   1) scan -> requireSensor -> connect -> 到达 Ready -> init
-  2) setParam("NTF_EMG","ON") 起 EMG 流，startDataNotification，确认收到数据
+  2) setParam("NTF_EEG","ON") 起 EEG 流，startDataNotification，确认收到数据
   3) 起流中 setParam("FILTER_50HZ","ON")（README：起流中改 NTF_*/FILTER_* 会
      自动停流重起），校验返回 "OK"
   4) getParam("FILTER") 反映新值（FILTER_50HZ=ON）
@@ -150,15 +150,15 @@ def main():
     print(f"[init] SensorProfile.init() -> {init_txt}", flush=True)
     record(results, "SensorProfile.init 返回 True", iret is True, "init() 返回 True", f"init() -> {init_txt}")
 
-    # 起 EMG 流
-    print("\n[起流] SensorProfile.setParam('NTF_EMG', 'ON') ...", flush=True)
+    # 起 EEG 流
+    print("\n[起流] SensorProfile.setParam('NTF_EEG', 'ON') ...", flush=True)
     try:
-        p_ret = sensor.setParam("NTF_EMG", "ON")
+        p_ret = sensor.setParam("NTF_EEG", "ON")
         p_txt = f"返回 {p_ret!r}"
     except Exception as e:
         p_ret = None
         p_txt = f"抛异常 {type(e).__name__}: {e}"
-    print(f"[起流] setParam('NTF_EMG', 'ON') -> {p_txt}", flush=True)
+    print(f"[起流] setParam('NTF_EEG', 'ON') -> {p_txt}", flush=True)
 
     counter = SampleCounter()
     sensor.onDataCallback = counter.on_data
@@ -275,7 +275,7 @@ def main():
     except Exception:
         pass
     try:
-        sensor.setParam("NTF_EMG", "OFF")
+        sensor.setParam("NTF_EEG", "OFF")
     except Exception:
         pass
 

@@ -13,7 +13,8 @@
   2) scan 匹配 OB6000C -> requireSensor -> connect -> init
   3) getDeviceInfo() 获取 DeviceInfo 对象
   4) 逐一读取 ModelName 及各模态 ChannelCount/SampleRate
-  5) 断言字段存在且值 ≥0；OB6000C 的 EMG/IMU 类字段 >0，EEG/ECG 类为 0
+  5) 断言字段存在且值 ≥0；OB6000C 的 EEG 类字段 >0（主模态），
+     其余模态按 getDeviceInfo() 运行时能力门控（只校验 ≥0，不硬断言是否=0）
 """
 
 import os
@@ -50,26 +51,11 @@ CAPABILITY_FIELDS = [
     "ConnectionIntervalMs", "PeripheralLatency", "SupervisionTimeoutMs", "MTUSize",
 ]
 
-# OB6000C 预期：EMG/IMU/Acc/Gyro 类字段 >0
-# Euler/Quat/MagAngle 设备不支持，预期 =0 或 None
-# EEG/ECG/PPG/SPO2/BRTH 设备不支持，预期 =0 或 None
-OYWW_EXPECTED_POSITIVE = [
-    "EmgSampleRate", "EmgChannelCount",
-    "ImuSampleRate", "ImuChannelCount",
-    "AccSampleRate", "AccChannelCount",
-    "GyroSampleRate", "GyroChannelCount",
-    "ImpeSampleRate", "ImpeChannelCount",
-]
-
-OYWW_EXPECTED_ZERO = [
-    "EulerSampleRate", "EulerChannelCount",
-    "QuatSampleRate", "QuatChannelCount",
-    "MagAngleSampleRate", "MagAngleChannelCount",
-    "EegSampleRate", "EegChannelCount",
-    "EcgSampleRate", "EcgChannelCount",
-    "PpgSampleRate", "PpgChannelCount",
-    "Spo2SampleRate", "Spo2ChannelCount",
-    "BrthSampleRate", "BrthChannelCount",
+# OB6000C 主模态为 EEG，EEG 类字段预期 >0。
+# 其余模态（EMG/IMU/Acc/Gyro/Euler/Quat/MagAngle/ECG/PPG/SPO2/BRTH/IMPEDANCE）
+# 按 getDeviceInfo() 运行时能力门控，只做 ≥0 校验，不强硬断言是否=0。
+EEG_EXPECTED_POSITIVE = [
+    "EegSampleRate", "EegChannelCount", "EegMaxSampleRate",
 ]
 
 # 链路参数允许 -1（表示 unknown，README: "0 / -1 / 0 = unknown"）
@@ -267,29 +253,27 @@ def main():
     record(results, "所有数值字段 ≥0（链路参数 -1 除外）", all_ge_zero,
            "所有数值字段 ≥0 或链路参数 = -1", "全部 ≥0" if all_ge_zero else f"存在负数: {zero_or_none_fields}")
 
-    # 检查3：OB6000C 预期 >0 的字段
+    # 检查3：OB6000C EEG 主模态字段预期 >0（动态门控，其余模态只校验 ≥0）
     positive_ok = True
-    for f in OYWW_EXPECTED_POSITIVE:
+    for f in EEG_EXPECTED_POSITIVE:
         v = field_values.get(f)
         if isinstance(v, (int, float)):
             if v <= 0:
-                print(f"[检查3] {f} = {v}（预期 >0）", flush=True)
+                print(f"[检查3] {f} = {v}（EEG 主模态预期 >0）", flush=True)
                 positive_ok = False
-    record(results, "OB6000C 预期字段（EMG/IMU/ACC/GYRO 等）>0", positive_ok,
-           "OB6000C 的 EMG/IMU/Acc/Gyro 等字段 >0",
+    record(results, "OB6000C EEG 主模态字段 >0（EegSampleRate/EegChannelCount/EegMaxSampleRate）",
+           positive_ok,
+           "OB6000C 的 EEG 类字段 >0",
            "全部 >0" if positive_ok else "存在 ≤0")
 
-    # 检查4：OB6000C 预期 =0 的字段（EEG/ECG/PPG/SPO2/BRTH）
-    zero_ok = True
-    for f in OYWW_EXPECTED_ZERO:
-        v = field_values.get(f)
-        if isinstance(v, (int, float)):
-            if v != 0 and v is not None:
-                print(f"[检查4] {f} = {v}（预期 =0 或 None）", flush=True)
-                zero_ok = False
-    record(results, "OB6000C 非预期字段（EEG/ECG/PPG/SPO2/BRTH）=0", zero_ok,
-           "OB6000C 的 EEG/ECG/PPG/SPO2/BRTH 等字段 =0",
-           "全部 =0" if zero_ok else "存在非零")
+    # 检查4：其余模态（非 EEG）仅做信息记录，不做 =0 断言（能力门控由 getDeviceInfo 决定）
+    print(f"\n[检查4] 其余模态值（能力门控，仅信息展示，不参与 PASS/FAIL 判定）", flush=True)
+    non_eeg_fields = [f for f in CAPABILITY_FIELDS
+                      if f not in EEG_EXPECTED_POSITIVE
+                      and f.endswith(("SampleRate", "ChannelCount"))
+                      and "Max" not in f]
+    for f in non_eeg_fields:
+        print(f"  {f} = {field_values.get(f)!r}", flush=True)
 
     # 清理
     try:

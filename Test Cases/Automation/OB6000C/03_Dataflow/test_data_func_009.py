@@ -6,7 +6,7 @@
 
 流程：
   1) scan -> requireSensor -> connect -> 到达 Ready -> init(config.PACKAGE_SAMPLE_COUNT, ...)
-  2) setParam("NTF_EMG", "ON") 起 EMG 流
+  2) setParam("NTF_EEG", "ON") 起 EEG 流
   3) startDataNotification 后采集窗口内收集所有批次
   4) 统计每批"每通道样本数"（len(channelSamples[0])），校验：
      - 多数批 == packageSampleCount（满批占比 >= 80%）
@@ -17,7 +17,7 @@
   packageSampleCount 是 init 时设定的"每包样本数"（时间维度样本点数）。
   一批 SensorData 的每通道样本数应约等于该值（多数批精确相等）。
   允许边界批不足（如停流时刻截断的最后一批）。
-  EMG 采样率 500Hz、packageSampleCount=20，每秒约 25 批，5s 内上百批，统计充分。
+  EEG 采样率高且多通道、packageSampleCount=20，数秒内多批，统计充分。
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
@@ -188,15 +188,15 @@ def main():
     print(f"[init] SensorProfile.init() -> {init_txt}", flush=True)
     record(results, "SensorProfile.init 返回 True", iret is True, "init() 返回 True", f"init() -> {init_txt}")
 
-    # 起 EMG 流
-    print("\n[起流] SensorProfile.setParam('NTF_EMG', 'ON') ...", flush=True)
+    # 起 EEG 流
+    print("\n[起流] SensorProfile.setParam('NTF_EEG', 'ON') ...", flush=True)
     try:
-        p_ret = sensor.setParam("NTF_EMG", "ON")
+        p_ret = sensor.setParam("NTF_EEG", "ON")
         p_txt = f"返回 {p_ret!r}"
     except Exception as e:
         p_ret = None
         p_txt = f"抛异常 {type(e).__name__}: {e}"
-    print(f"[起流] setParam('NTF_EMG', 'ON') -> {p_txt}", flush=True)
+    print(f"[起流] setParam('NTF_EEG', 'ON') -> {p_txt}", flush=True)
 
     collector = BatchSizeCollector()
     sensor.onDataCallback = collector.on_data
@@ -231,7 +231,7 @@ def main():
     except Exception:
         pass
     try:
-        sensor.setParam("NTF_EMG", "OFF")
+        sensor.setParam("NTF_EEG", "OFF")
     except Exception:
         pass
     try:

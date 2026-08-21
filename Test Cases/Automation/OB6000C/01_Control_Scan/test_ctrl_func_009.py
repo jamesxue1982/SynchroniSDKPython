@@ -29,10 +29,10 @@ import config
 from common import record
 
 
-def _find_oyww(devices):
+def _find_ob6000c(devices):
     for d in devices or []:
         name = getattr(d, 'Name', None) or ''
-        if name.upper().startswith('OYWW'):
+        if name.upper().startswith('OB6000C'):
             return d
     return None
 
@@ -78,14 +78,14 @@ def main():
     except Exception as e:
         devices = None
         print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    target = _find_oyww(devices)
+    target = _find_ob6000c(devices)
 
     if target is None:
-        print("[检查] 未发现 OYWW 设备", flush=True)
+        print("[检查] 未发现 OB6000C 设备", flush=True)
         record(results, "连接后 getConnectedSensors 含该 mac", False,
-               "getConnectedSensors 含目标 mac", "未发现 OYWW 设备")
+               "getConnectedSensors 含目标 mac", "未发现 OB6000C 设备")
         record(results, "连接后 getConnectedDevices 含该 mac", False,
-               "getConnectedDevices 含目标 mac", "未发现 OYWW 设备")
+               "getConnectedDevices 含目标 mac", "未发现 OB6000C 设备")
     else:
         target_mac = _mac_of_device(target)
         name = getattr(target, 'Name', '?')

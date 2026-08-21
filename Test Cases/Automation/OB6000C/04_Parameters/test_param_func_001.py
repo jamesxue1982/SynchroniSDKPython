@@ -50,6 +50,8 @@ def _parse_pipe(s):
 # 每个待测 NTF 键：need_field 为 None 表示无条件测；否则按 DeviceInfo 字段判定
 # get_key 为 getParam("NTF") 中用于核对的键（NTF_PPG_RAW 是 NTF_PPG 的别名）。
 KEY_SPECS = [
+    {"key": "NTF_EEG", "need_field": None, "get_key": "NTF_EEG"},
+    {"key": "NTF_ECG", "need_field": "EcgChannelCount", "get_key": "NTF_ECG"},
     {"key": "NTF_EMG", "need_field": None, "get_key": "NTF_EMG"},
     {"key": "NTF_GEST", "need_field": None, "get_key": "NTF_GEST"},
     {"key": "NTF_IMU", "need_field": None, "get_key": "NTF_IMU"},

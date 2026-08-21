@@ -12,20 +12,23 @@
        断言收到该 DataType 数据且样本数>0
      - ChannelCount==0：记录"不支持，跳过"（SKIP）
 
-目标模态（OB6000C 腕带，据 probe_device_info 实测能力）与映射：
+目标模态（OB6000C EEG 设备，通道数由 getDeviceInfo() 运行时读取）与映射：
   DataType               setParam key        ChannelCount 字段    采集时长
-  NTF_EMG                "NTF_EMG"           EmgChannelCount=8     5s
-  NTF_GEST               "NTF_GEST"          EmgChannelCount=8     5s（DeviceInfo 无独立 GEST 标称值）
-  NTF_IMPEDANCE          "NTF_IMPEDANCE"     ImpeChannelCount=8    25s（1Hz，需较长采集）
-  NTF_ACC                "NTF_GFORCE_ACC"    AccChannelCount=3     5s
-  NTF_GYRO               "NTF_GFORCE_GYRO"   GyroChannelCount=3    5s
-  NTF_EULER_DATA         "NTF_GFORCE_EULER"  EulerChannelCount=3   5s
-  NTF_QUATERNION         "NTF_GFORCE_QUAT"   QuatChannelCount=4    5s
+  NTF_EEG                "NTF_EEG"           EegChannelCount       5s（主模态，静息即有数据）
+  NTF_ECG                "NTF_ECG"           EcgChannelCount       5s（EEG/ECG 同写）
+  NTF_EMG                "NTF_EMG"           EmgChannelCount       5s（能力门控）
+  NTF_GEST               "NTF_GEST"          EmgChannelCount       5s（DeviceInfo 无独立 GEST 标称值）
+  NTF_IMPEDANCE          "NTF_IMPEDANCE"     ImpeChannelCount      25s（1Hz，需较长采集）
+  NTF_ACC                "NTF_GFORCE_ACC"    AccChannelCount       5s
+  NTF_GYRO               "NTF_GFORCE_GYRO"   GyroChannelCount      5s
+  NTF_EULER_DATA         "NTF_GFORCE_EULER"  EulerChannelCount     5s
+  NTF_QUATERNION         "NTF_GFORCE_QUAT"   QuatChannelCount      5s
 
 说明：
+  - 每个模态是否测试由 getDeviceInfo() 的 ChannelCount 运行时判定（>0 才起流）。
   - GEST/EMG 在传统设备互斥，逐个测完 setParam OFF，避免串扰。
   - IMPEDANCE 采样率 1Hz，packageSampleCount=20 约需 20s 凑满一批，故采集 25s。
-  - NTF_IMU 聚合流（ImuChannelCount=13）不在本条覆盖（见 DATA-FUNC-010）。
+  - NTF_IMU 聚合流（ImuChannelCount）不在本条覆盖（见 DATA-FUNC-010）。
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
@@ -56,6 +59,10 @@ def _dt_name(dt):
 
 # (显示名, DataType, setParam key, ChannelCount 字段名, 动作提示, 采集秒数)
 MODALITIES = [
+    ("EEG", DataType.NTF_EEG, "NTF_EEG", "EegChannelCount",
+     "请保持佩戴，EEG 静息/佩戴即有信号，无需额外动作", 5),
+    ("ECG", DataType.NTF_ECG, "NTF_ECG", "EcgChannelCount",
+     "请保持佩戴且电极接触良好，让 ECG 产生信号", 5),
     ("EMG", DataType.NTF_EMG, "NTF_EMG", "EmgChannelCount",
      "请用力握拳或绷紧被测部位肌肉，让 EMG 产生信号", 5),
     ("GEST", DataType.NTF_GEST, "NTF_GEST", "EmgChannelCount",

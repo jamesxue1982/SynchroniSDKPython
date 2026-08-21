@@ -2,38 +2,36 @@
 """DEV-SM-014：onDeviceInfoUpdate 触发与就地更新。
 
 对应用例：02_连接与状态机.md -> DEV-SM-014
-可自动化：semi-auto（需人工接入 USB BLE dongle 并关闭主机蓝牙）
+可自动化：semi-auto（需人工确认设备与后端环境）
 
 触发条件（README）：
   onDeviceInfoUpdate 在 init 后 DeviceInfo 变化时触发，主要触发源有二：
-    1) bumble 后端：连接后链路参数（ConnectionIntervalMs / PeripheralLatency /
+    1) EEG_SAMPLE_RATE 变更改变上报采样率（OB6000C 主模态，与后端无关）
+    2) bumble 后端：连接后链路参数（ConnectionIntervalMs / PeripheralLatency /
        SupervisionTimeoutMs）由外设更新
-    2) EEG_SAMPLE_RATE 变更改变上报采样率
-  OB6000C 腕带【无 EEG】（EegSampleRate==0），因此无法用 EEG_SAMPLE_RATE 触发；
-  必须走【bumble 后端】的链路参数更新路径。
+  OB6000C 为 EEG 脑电设备，EEG_SAMPLE_RATE 变更是主要触发源（bleak/bumble 均可用）；
+  bumble 后端的链路参数更新为另一可选触发源。
 
 后端切换说明：
-  后端在 SDK import 时确定，单进程内无法切换。因此：
-    - 主进程若已是 bumble，直接跑测试；
-    - 主进程若是 bleak，提示用户关闭主机蓝牙 + 接入 dongle，确认后以
-      SENSOR_SDK_BLE_BACKEND=bumble 子进程重跑本脚本。
+  后端在 SDK import 时确定，单进程内无法切换。OB6000C 为 EEG 设备，EEG_SAMPLE_RATE
+  触发源与后端无关，故当前后端（bleak/bumble）均可直接跑测试；如需额外覆盖
+  bumble 链路参数更新触发源，可手动以 SENSOR_SDK_BLE_BACKEND=bumble 启动。
 
 前置条件（运行前人工准备）：
-  - 主机(电脑)：关闭主机蓝牙，接入 USB BLE dongle（Windows 上可能需先用管理员
-    权限把 dongle 绑定到 WinUSB，可先跑 CTRL-FUNC-011 checkSetupDongle 引导）
+  - 主机(电脑)：蓝牙已开启（bleak）或已接入 USB BLE dongle（bumble，Windows 上
+    可能需先用管理员权限把 dongle 绑定到 WinUSB，可先跑 CTRL-FUNC-011 引导）
   - 待测设备：OB6000C 上电、在范围内
 
 流程：
-  1) 确认后端（bumble）/ 引导接入 dongle
+  1) 确认后端（bleak/bumble 均可）
   2) 确认设备开机 -> 按回车
   3) scan -> requireSensor -> connect 到 Ready -> init
   4) init 前注册 onDeviceInfoUpdate，init 后记录 getDeviceInfo() 字段快照
-  5) 观察窗口内等待 onDeviceInfoUpdate 触发（链路参数更新）
+  5) 观察窗口内等待 onDeviceInfoUpdate 触发（EEG_SAMPLE_RATE 变更 / 链路参数更新）
   6) 断言回调参数为 DeviceInfo 且字段快照已变化（就地更新）
 """
 
 import os
-import subprocess
 import sys
 import time
 
@@ -84,7 +82,7 @@ def run_test():
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
 
     print("\n[前置条件]", flush=True)
-    print("  - 主机(电脑)：蓝牙已关闭，已接入 USB BLE dongle（bumble 后端）", flush=True)
+    print("  - 主机(电脑)：蓝牙已开启（bleak）或已接入 USB BLE dongle（bumble）", flush=True)
     print("  - 待测设备：OB6000C 上电、在范围内", flush=True)
 
     input("\n>>> [人工操作] 请确认待测设备 OB6000C 已【开机】且在范围内，完成后按回车继续 ...")
@@ -197,7 +195,7 @@ def run_test():
            "getDeviceInfo() 返回 DeviceInfo（非 None）",
            f"返回 {type(info_before).__name__ if info_before else None}")
 
-    # 触发尝试：EEG_SAMPLE_RATE（腕带无 EEG，通常无效，但作为 README 提及的触发方式之一尝试）
+    # 触发尝试：EEG_SAMPLE_RATE（OB6000C 主模态，变更后触发 onDeviceInfoUpdate）
     print("\n[触发尝试] setParam(EEG_SAMPLE_RATE, 500) ...", flush=True)
     try:
         sret = sensor.setParam("EEG_SAMPLE_RATE", "500")
@@ -212,10 +210,10 @@ def run_test():
     print(f"[结果] onDeviceInfoUpdate 触发 {len(updates)} 次", flush=True)
     if not triggered:
         # 无法触发：说明当前后端 + 设备无触发场景
-        print("[说明] 未触发。可能原因：bumble 链路参数未更新，或设备无 EEG 采样率变更。", flush=True)
+        print("[说明] 未触发。可能原因：EEG_SAMPLE_RATE 未真正变更，或 bumble 链路参数未更新。", flush=True)
         record(results, "onDeviceInfoUpdate 触发（≥1 次）", None,
                "onDeviceInfoUpdate 至少触发 1 次",
-               f"触发 {len(updates)} 次（{backend} 后端 + 腕带无 EEG，可能无触发场景）")
+               f"触发 {len(updates)} 次（{backend} 后端，EEG_SAMPLE_RATE 变更或链路参数更新均未触发）")
         record(results, "回调参数为 DeviceInfo 对象", None,
                "onDeviceInfoUpdate 回调参数为 DeviceInfo", "onDeviceInfoUpdate 未触发，无法验证")
         record(results, "就地更新（回调与 getDeviceInfo 同一缓存对象）", None,
@@ -284,38 +282,16 @@ def main():
     ctrl = SensorControllerInstance
     backend = ctrl.getBLEBackendName()
 
-    # 子进程模式：直接跑测试（由主进程以 bumble 后端启动）
-    if os.environ.get('DEV_SM_014_RUN') == '1':
-        run_test()
-        return
-
     print("=" * 60, flush=True)
     print("DEV-SM-014 onDeviceInfoUpdate 触发与就地更新", flush=True)
     print("=" * 60, flush=True)
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"当前进程后端 = {backend}", flush=True)
 
-    if (backend or '').lower() == 'bumble':
-        run_test()
-        return
-
-    # bleak 后端：链路参数更新不可用，腕带无 EEG，需切 bumble
-    print("\n[后端引导]", flush=True)
-    print("  当前为 bleak 后端。onDeviceInfoUpdate 的主要触发源是「链路参数更新」，", flush=True)
-    print("  仅在 bumble（USB dongle）后端可用；而腕带无 EEG，无法用 EEG_SAMPLE_RATE 触发。", flush=True)
-    print("  因此本用例需切换到 bumble 后端。", flush=True)
-    print("\n  请完成以下两步：", flush=True)
-    print("    1) 关闭【电脑】蓝牙", flush=True)
-    print("    2) 接入 USB BLE dongle（如未绑定 WinUSB 驱动，请先跑 CTRL-FUNC-011 引导）", flush=True)
-    input("\n>>> [人工操作] 完成上述两步后按回车继续（将以 bumble 后端子进程重跑）...")
-
-    env = os.environ.copy()
-    env['SENSOR_SDK_BLE_BACKEND'] = 'bumble'
-    env['DEV_SM_014_RUN'] = '1'
-    print("\n[重跑] 以 SENSOR_SDK_BLE_BACKEND=bumble 启动子进程 ...", flush=True)
-    subprocess.run([sys.executable, os.path.abspath(__file__)], env=env)
-
-    # 子进程已输出结果，主进程不再重复汇总
+    # OB6000C 为 EEG 设备，EEG_SAMPLE_RATE 变更即可触发 onDeviceInfoUpdate，
+    # 该触发源与后端无关（bleak/bumble 均可用），故直接跑测试。
+    # 若还需覆盖「bumble 链路参数更新」触发源，可手动以 SENSOR_SDK_BLE_BACKEND=bumble 启动。
+    run_test()
     ctrl.terminate()
 
 

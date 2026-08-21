@@ -30,10 +30,10 @@ from common import record
 BAD_MAC = "00:00:00:00:00:00"  # 用于"未命中"的错误 mac
 
 
-def _find_oyww(devices):
+def _find_ob6000c(devices):
     for d in devices or []:
         name = getattr(d, 'Name', None) or ''
-        if name.upper().startswith('OYWW'):
+        if name.upper().startswith('OB6000C'):
             return d
     return None
 
@@ -70,18 +70,18 @@ def main():
     except Exception as e:
         devices = None
         print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    target = _find_oyww(devices)
+    target = _find_ob6000c(devices)
 
     created_sensor = None
     correct_mac = None
 
     if target is None:
-        print("[检查1] 未发现 OYWW 设备", flush=True)
+        print("[检查1] 未发现 OB6000C 设备", flush=True)
         record(results, "requireSensor(有效设备) 返回 SensorProfile", False,
-               "requireSensor(有效 BLEDevice) 返回 SensorProfile", "未发现 OYWW 设备")
-        print("[检查2] 未发现 OYWW 设备，无法验证命中", flush=True)
+               "requireSensor(有效 BLEDevice) 返回 SensorProfile", "未发现 OB6000C 设备")
+        print("[检查2] 未发现 OB6000C 设备，无法验证命中", flush=True)
         record(results, "getSensor(正确 mac) 返回 profile", False,
-               "getSensor(正确 mac) 返回 SensorProfile", "未发现 OYWW 设备")
+               "getSensor(正确 mac) 返回 SensorProfile", "未发现 OB6000C 设备")
     else:
         name = getattr(target, 'Name', '?')
         correct_mac = getattr(target, 'Address', None)

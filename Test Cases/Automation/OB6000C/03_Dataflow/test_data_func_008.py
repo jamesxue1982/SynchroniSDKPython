@@ -6,7 +6,7 @@
 
 流程：
   1) scan -> requireSensor -> connect -> 到达 Ready -> init
-  2) setParam("NTF_EMG", "ON") 起 EMG 流
+  2) setParam("NTF_EEG", "ON") 起 EEG 流
   3) startDataNotification 后，人工轻微遮挡/移远设备制造干扰（保持连接不断链）
   4) 采集 15s 收集所有批次，对每批统计 getLostPackageCount() 与 sample.isLost 置位样本数：
      - 无丢包计数（lostPackageCount==0）的批次，不应有 isLost=True 的样本
@@ -15,9 +15,9 @@
 说明：
   丢包计数（package 级）与样本丢包标记（sample 级）应保持一致：
   计数为 0 时无丢包标记，计数 >0 时有丢包标记。
-  OB6000C 为新 EMG 设备，发生丢包时 lostPackageCount 会非 0；
+  OB6000C 为 EEG 脑电设备，发生丢包时 lostPackageCount 会非 0；
   本用例通过人工制造轻微干扰触发丢包，以验证标记与计数一致。
-  EMG 采样率 500Hz，15s 内可多批，覆盖多批统计。
+  EEG 采样率高且多通道，15s 内可多批，覆盖多批统计。
 
 前置条件：
   - 主机(电脑)：蓝牙已开启
@@ -199,15 +199,15 @@ def main():
     print(f"[init] SensorProfile.init() -> {init_txt}", flush=True)
     record(results, "SensorProfile.init 返回 True", iret is True, "init() 返回 True", f"init() -> {init_txt}")
 
-    # 起 EMG 流
-    print("\n[起流] SensorProfile.setParam('NTF_EMG', 'ON') ...", flush=True)
+    # 起 EEG 流
+    print("\n[起流] SensorProfile.setParam('NTF_EEG', 'ON') ...", flush=True)
     try:
-        p_ret = sensor.setParam("NTF_EMG", "ON")
+        p_ret = sensor.setParam("NTF_EEG", "ON")
         p_txt = f"返回 {p_ret!r}"
     except Exception as e:
         p_ret = None
         p_txt = f"抛异常 {type(e).__name__}: {e}"
-    print(f"[起流] setParam('NTF_EMG', 'ON') -> {p_txt}", flush=True)
+    print(f"[起流] setParam('NTF_EEG', 'ON') -> {p_txt}", flush=True)
 
     collector = LostCollector()
     sensor.onDataCallback = collector.on_data
@@ -258,7 +258,7 @@ def main():
     except Exception:
         pass
     try:
-        sensor.setParam("NTF_EMG", "OFF")
+        sensor.setParam("NTF_EEG", "OFF")
     except Exception:
         pass
     try:

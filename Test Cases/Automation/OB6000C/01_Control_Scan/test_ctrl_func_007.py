@@ -28,10 +28,10 @@ import config
 from common import record
 
 
-def _find_oyww(devices):
+def _find_ob6000c(devices):
     for d in devices or []:
         name = getattr(d, 'Name', None) or ''
-        if name.upper().startswith('OYWW'):
+        if name.upper().startswith('OB6000C'):
             return d
     return None
 
@@ -76,12 +76,12 @@ def main():
     except Exception as e:
         devices = None
         print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    target = _find_oyww(devices)
+    target = _find_ob6000c(devices)
 
     if target is None:
-        print("[检查1] 未发现 OYWW 设备，无法验证有效输入", flush=True)
+        print("[检查1] 未发现 OB6000C 设备，无法验证有效输入", flush=True)
         record(results, "requireSensor(有效设备) 返回 SensorProfile", False,
-               "requireSensor(有效 BLEDevice) 返回 SensorProfile", "未发现 OYWW 设备")
+               "requireSensor(有效 BLEDevice) 返回 SensorProfile", "未发现 OB6000C 设备")
     else:
         name = getattr(target, 'Name', '?')
         addr = getattr(target, 'Address', '?')
