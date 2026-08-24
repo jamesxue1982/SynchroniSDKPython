@@ -76,11 +76,19 @@ def main():
     except Exception as e:
         devices = None
         print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
+
+    if devices is None:
+        print("[扫描] 扫描结果为空（scan 返回 None）", flush=True)
+    else:
+        print(f"[扫描] 发现 {len(devices)} 台设备：", flush=True)
+        for d in devices:
+            print(f"    - Name={getattr(d, 'Name', '?')!r}  Address={getattr(d, 'Address', '?')!r}", flush=True)
+
     target = match_target(devices)
 
     if target is None:
-        print("[FAIL] 未匹配到 config 中启用的设备（OYWW1100/80F3）", flush=True)
-        record(results, "scan 匹配到目标设备", False, "scan 返回含 OYWW1100", "未匹配到目标")
+        print(f"[FAIL] 未匹配到 config 中启用的设备（identity={config.TARGET_IDENTITY}）", flush=True)
+        record(results, "scan 匹配到目标设备", False, f"scan 返回含 identity {config.TARGET_IDENTITY}", "未匹配到目标")
         print("\n结论: FAIL", flush=True)
         ctrl.terminate()
         return

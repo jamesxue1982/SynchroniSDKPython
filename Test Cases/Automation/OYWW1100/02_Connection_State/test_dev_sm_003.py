@@ -47,14 +47,13 @@ def main():
     print("=" * 60, flush=True)
     print(f"sdk version = {ctrl.getVersion()}", flush=True)
     print(f"ble backend = {ctrl.getBLEBackendName()}", flush=True)
-
     print("\n[前置条件]", flush=True)
     print("  - 主机(电脑)：蓝牙已开启", flush=True)
-    print("  - 待测设备（目标）：OYWW1100 上电在范围内", flush=True)
+    print(f"  - 待测设备（目标）上电并在范围内", flush=True)
     print("  - 非目标设备：OB6000C 上电在范围内（用于验证不误连）", flush=True)
 
     input("\n>>> [人工操作] 请确认以下设备均已【开机】且在范围内：\n"
-          "    1) 目标设备 OYWW1100\n"
+          "    1) 目标设备 gForceUltra\n"
           "    2) 非目标设备 OB6000C\n"
           "    完成后按回车继续 ...")
 
