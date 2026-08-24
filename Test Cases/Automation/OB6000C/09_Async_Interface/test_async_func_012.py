@@ -35,7 +35,7 @@ import common
 
 READY_TIMEOUT = 15
 
-from common import record, _identity_of, match_target
+from common import record, _identity_of, async_scan_and_match_all
 
 
 def _tag_of(d):
@@ -72,29 +72,9 @@ async def main_async():
         ctrl.terminate()
         return
 
-    # 扫描
+    # 扫描匹配
     print(f"\n[扫描] 目标 identity: {common.TARGET_IDENTITIES}", flush=True)
-    print(f"[扫描] await ctrl.asyncScan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
-    try:
-        devices = await ctrl.asyncScan(config.SCAN_TIMEOUT_MS)
-    except Exception as e:
-        devices = None
-        print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    print(f"[扫描] 扫描到 {len(devices) if devices else 0} 台设备:", flush=True)
-    if devices:
-        for d in devices:
-            n = getattr(d, 'Name', '?')
-            a = getattr(d, 'Address', '?')
-            print(f"  {n} {a} identity={_identity_of(n)}", flush=True)
-
-    # 匹配多台设备
-    targets = []
-    for tid in common.TARGET_IDENTITIES:
-        t = match_target(devices, target_identity=tid)
-        if t is None:
-            print(f"[扫描] 未匹配到 identity={tid}，跳过", flush=True)
-            break
-        targets.append((tid, t))
+    targets, devices = await async_scan_and_match_all(ctrl, scan_ms=config.SCAN_TIMEOUT_MS, required=2)
     if len(targets) < 2:
         print(f"\n[SKIP] 需要 ≥2 台设备，当前仅匹配到 {len(targets)} 台", flush=True)
         record(results, "环境中存在 ≥2 台目标设备", None,

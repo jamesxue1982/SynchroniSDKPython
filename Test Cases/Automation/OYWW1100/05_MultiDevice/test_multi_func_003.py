@@ -28,7 +28,7 @@ import config
 import common
 from common import record
 from multi_common import (
-    match_all_targets, disconnect_all,
+    scan_and_match_all, disconnect_all,
     check_device_count, print_summary,
 )
 
@@ -69,18 +69,8 @@ def main():
         ctrl.terminate()
         return
 
-    print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
-    try:
-        devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
-    except Exception as e:
-        devices = None
-        print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-
-    if devices:
-        for d in devices:
-            print(f"  - {getattr(d, 'Name', '?')} {getattr(d, 'Address', '?')}", flush=True)
-
-    matched = match_all_targets(devices)
+    print(f"\n[扫描] 目标 identity: {common.TARGET_IDENTITIES}", flush=True)
+    matched, devices = scan_and_match_all(ctrl, scan_ms=config.SCAN_TIMEOUT_MS, required=2)
     print(f"[匹配] 目标设备数: {len(common.TARGET_IDENTITIES)}, 匹配到: {len(matched)}", flush=True)
     if not check_device_count(results, matched, required=2):
         print_summary(results, True)
@@ -89,7 +79,7 @@ def main():
 
     # 连接两台设备
     sensors = []
-    for device, tid in matched:
+    for tid, device in matched:
         sensor = ctrl.requireSensor(device)
         if sensor is None:
             record(results, f"requireSensor({tid})", False, "返回 SensorProfile", "返回 None")

@@ -20,7 +20,7 @@ sys.path.insert(0, AUTOMATION_DIR)
 from sensor import *
 import config
 import common
-from common import _identity_of, match_target
+from common import _identity_of, scan_and_match
 
 # 所有 NTF_* key，来自 README
 NTF_KEYS = [
@@ -51,13 +51,12 @@ def main():
 
     # scan
     print(f"\n[扫描] ...", flush=True)
-    devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
+    target, devices = scan_and_match(ctrl, scan_ms=config.SCAN_TIMEOUT_MS)
     if devices:
         for d in devices:
             n = getattr(d, 'Name', '?')
             a = getattr(d, 'Address', '?')
             print(f"  {n} {a} identity={_identity_of(n)}", flush=True)
-    target = match_target(devices)
     if target is None:
         print("[FAIL] 未匹配到目标设备", flush=True)
         ctrl.terminate()

@@ -12,7 +12,6 @@
 """
 
 import os
-import re
 import sys
 import time
 
@@ -20,6 +19,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from sensor import *
 import config
+import common
+from common import scan_and_match
 
 # DeviceInfo 候选字段（来自 README L313-323 与 example）
 DEVICE_INFO_FIELDS = [
@@ -40,30 +41,6 @@ DEVICE_INFO_FIELDS = [
     "ImuChannelCount", "ImuSampleRate",
     "ConnectionIntervalMs", "PeripheralLatency", "SupervisionTimeoutMs",
 ]
-
-
-def _identity_of(name):
-    m = re.search(r"\(([0-9A-Fa-f]{4})\)", name or "")
-    return m.group(1).upper() if m else None
-
-
-def _match_target(devices):
-    for cfg in config.DEVICES:
-        if not cfg.get("enabled", True):
-            continue
-        mac = (cfg.get("mac") or "").strip().upper()
-        identity = (cfg.get("identity") or "").strip().upper()
-        prefix = cfg.get("name_prefix") or ""
-        for d in devices:
-            addr = (getattr(d, 'Address', '') or '').upper()
-            name = getattr(d, 'Name', '') or ''
-            if mac and addr == mac:
-                return d
-            if identity and _identity_of(name) == identity:
-                return d
-            if not mac and not identity and prefix and name.startswith(prefix):
-                return d
-    return None
 
 
 def dump_device_info(info):
@@ -96,9 +73,8 @@ def main():
         ctrl.terminate()
         return
 
-    print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
-    devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
-    target = _match_target(devices)
+    print(f"\n[扫描] 目标 identity: {common.TARGET_IDENTITIES}", flush=True)
+    target, devices = scan_and_match(ctrl, scan_ms=config.SCAN_TIMEOUT_MS)
     if target is None:
         print("[失败] 未匹配到 config 中启用的设备", flush=True)
         ctrl.terminate()

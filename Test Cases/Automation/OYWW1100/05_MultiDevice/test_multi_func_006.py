@@ -29,7 +29,7 @@ import config
 import common
 from common import record
 from multi_common import (
-    match_all_targets, disconnect_all,
+    scan_and_match_all, disconnect_all,
     check_device_count, print_summary,
 )
 
@@ -71,18 +71,8 @@ def main():
         ctrl.terminate()
         return
 
-    print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
-    try:
-        devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
-    except Exception as e:
-        devices = None
-        print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-
-    if devices:
-        for d in devices:
-            print(f"  - {getattr(d, 'Name', '?')} {getattr(d, 'Address', '?')}", flush=True)
-
-    matched = match_all_targets(devices)
+    print(f"\n[扫描] 目标 identity: {common.TARGET_IDENTITIES}", flush=True)
+    matched, devices = scan_and_match_all(ctrl, scan_ms=config.SCAN_TIMEOUT_MS, required=2)
     print(f"[匹配] 目标设备数: {len(common.TARGET_IDENTITIES)}, 匹配到: {len(matched)}", flush=True)
     if not check_device_count(results, matched, required=2):
         print_summary(results, True)
@@ -91,7 +81,7 @@ def main():
 
     # 连接所有设备
     sensors = []
-    for device, tid in matched:
+    for tid, device in matched:
         sensor = ctrl.requireSensor(device)
         if sensor is None:
             record(results, f"requireSensor({tid})", False, "返回 SensorProfile", "返回 None")
@@ -141,28 +131,11 @@ def main():
         print(f"[就绪] {tid}: {name} {addr}", flush=True)
         sensors.append(sensor)
 
-    # 判断是否同型号（用 config 中的 name_prefix 区分，因 getDeviceInfo().ModelName 不可靠）
-    prefixes = set()
+    # 打印各设备型号信息（仅供参考；前置条件已要求混合型号，由人工确认）
     for s, (_, tid) in zip(sensors, matched):
         info = s.getDeviceInfo()
         mn = info.ModelName if info else None
-        cfg = common._find_config(tid)
-        prefix = cfg.get('name_prefix', '?') if cfg else '?'
-        prefixes.add(prefix)
-        print(f"[型号] {s.BLEDevice.Address}: config name_prefix={prefix}, DeviceInfo.ModelName={mn}", flush=True)
-
-    same_model = len(prefixes) == 1
-    print(f"[判定] 同型号={same_model}, 型号列表(config name_prefix)={sorted(prefixes)}", flush=True)
-
-    if same_model:
-        record(results, "混合型号检测", None,
-               "不同型号时使用放宽参数",
-               f"config name_prefix 相同: {prefixes}，非混合型号场景，跳过")
-        print("[SKIP] 两台设备 name_prefix 相同，非混合型号场景，跳过", flush=True)
-        disconnect_all(sensors)
-        print_summary(results, True)
-        ctrl.terminate()
-        return
+        print(f"[型号] {s.BLEDevice.Address} ({tid}): DeviceInfo.ModelName={mn}", flush=True)
 
     # 混合型号参数
     print("\n[multiStart] 混合型号: timeout=60, maxDelayDispersionMs=-1, maxAttempts=5 ...", flush=True)

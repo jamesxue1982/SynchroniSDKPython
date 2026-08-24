@@ -78,7 +78,6 @@ def main():
             continue
         mac = (cfg.get("mac") or "").strip().upper()
         identity = (cfg.get("identity") or "").strip().upper()
-        prefix = cfg.get("name_prefix") or ""
         target = None
         for d in devices:
             addr = (getattr(d, 'Address', '') or '').upper()
@@ -87,9 +86,6 @@ def main():
                 target = d
                 break
             if identity and _identity_of(name) == identity:
-                target = d
-                break
-            if not mac and not identity and prefix and name.startswith(prefix):
                 target = d
                 break
         if target is None:

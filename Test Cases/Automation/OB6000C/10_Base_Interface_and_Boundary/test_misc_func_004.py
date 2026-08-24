@@ -29,7 +29,7 @@ sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
 import config
-from common import record, match_target
+from common import record, scan_and_match, async_scan_and_match
 
 COLLECT_SECONDS = 5
 
@@ -97,14 +97,9 @@ async def main_async():
     # 扫描匹配
     target_ids = config.TARGET_IDENTITY.split(",") if hasattr(config, 'TARGET_IDENTITY') else ["?"]
     print(f"\n[扫描] 目标 identity: {target_ids}（config.TARGET_IDENTITY = '{config.TARGET_IDENTITY}'）", flush=True)
-    try:
-        devices = await ctrl.asyncScan(config.SCAN_TIMEOUT_MS)
-    except Exception as e:
-        devices = None
-        print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
+    target, devices = await async_scan_and_match(ctrl, scan_ms=config.SCAN_TIMEOUT_MS)
     scanned_list = [(getattr(d, 'Name', '?'), getattr(d, 'Address', '?')) for d in (devices or [])]
     print(f"[扫描] 扫描到 {len(scanned_list)} 台设备: {scanned_list}", flush=True)
-    target = match_target(devices)
 
     if target is None:
         print(f"[FAIL] 未匹配到目标设备（目标 identity: {target_ids}，扫描到: {scanned_list}）", flush=True)

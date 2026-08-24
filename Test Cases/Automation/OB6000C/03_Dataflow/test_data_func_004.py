@@ -34,7 +34,7 @@ COLLECT_SECONDS = 3  # 起流后采集时长（秒），确认有数据
 DRAIN_WINDOW = 2     # 停流后刹车期（秒），等在途数据排空
 STABLE_WINDOW = 3    # 刹车后稳定观察期（秒），确认批数不再增长
 
-from common import record, _identity_of, match_target
+from common import record, scan_and_match
 
 
 class DataResult:
@@ -85,13 +85,7 @@ def main():
         return
 
     # 扫描匹配
-    print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
-    try:
-        devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
-    except Exception as e:
-        devices = None
-        print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    target = match_target(devices)
+    target, devices = scan_and_match(ctrl, scan_ms=config.SCAN_TIMEOUT_MS)
 
     if target is None:
         print("[FAIL] 未匹配到 config 中启用的设备", flush=True)

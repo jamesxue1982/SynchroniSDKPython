@@ -36,7 +36,7 @@ sys.path.insert(0, AUTOMATION_DIR)
 from sensor import *
 import config
 import common
-from common import record, _identity_of, match_target
+from common import record, scan_and_match
 
 LOST_OBSERVE_SECONDS = 15  # 采集观察时长（秒），留足人工制造干扰的时间
 
@@ -127,14 +127,9 @@ def main():
         ctrl.terminate()
         return
 
-    # 扫描匹配
-    print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
-    try:
-        devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
-    except Exception as e:
-        devices = None
-        print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    target = match_target(devices)
+    # 扫描匹配（未匹配到时自动重试，最多 3 次，间隔 10s）
+    print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS})，未匹配时最多重试 3 次（间隔 10s）...", flush=True)
+    target, devices = scan_and_match(ctrl, scan_ms=config.SCAN_TIMEOUT_MS)
 
     if target is None:
         print("[FAIL] 未匹配到目标设备（OYWW1100/80F3）", flush=True)

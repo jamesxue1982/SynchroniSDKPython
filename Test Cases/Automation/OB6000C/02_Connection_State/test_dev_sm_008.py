@@ -31,7 +31,7 @@ DISCONNECT_TIMEOUT = 60     # 断链检测超时（秒）
 RECONNECT_TIMEOUT = 120     # 自动重连恢复超时（秒）
 TRANSFER_RECOVER_TIMEOUT = 20  # 恢复 Ready 后等待起流恢复的超时（秒）
 
-from common import record, _identity_of, match_target
+from common import record, scan_and_match
 
 
 def _wait_until(cond, timeout, interval=0.5, what=""):
@@ -70,13 +70,7 @@ def main():
         return
 
     # 扫描匹配
-    print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
-    try:
-        devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
-    except Exception as e:
-        devices = None
-        print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    target = match_target(devices)
+    target, devices = scan_and_match(ctrl, scan_ms=config.SCAN_TIMEOUT_MS)
 
     if target is None:
         print("[FAIL] 未匹配到 config 中启用的设备（OB6000C/80F3）", flush=True)

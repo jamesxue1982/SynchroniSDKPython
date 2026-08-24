@@ -34,7 +34,7 @@ import config
 
 COLLECT_SECONDS = 5  # 起流后采集时长（秒）
 
-from common import record, _identity_of, match_target
+from common import record, scan_and_match
 
 
 def _dt_name(dt):
@@ -99,13 +99,7 @@ def main():
 
     # 扫描匹配
     print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
-    try:
-        devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
-    except Exception as e:
-        devices = None
-        print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    target = match_target(devices)
-
+    target, devices = scan_and_match(ctrl, scan_ms=config.SCAN_TIMEOUT_MS)
     if target is None:
         print("[FAIL] 未匹配到 config 中启用的设备", flush=True)
         record(results, "scan 匹配到目标设备", False, "scan 返回含启用的目标设备", "未匹配到目标")

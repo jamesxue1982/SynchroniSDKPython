@@ -32,18 +32,16 @@ sys.path.insert(0, AUTOMATION_DIR)
 import config
 
 
-# 读取 config 匹配参数（模块级，供 PROBE format 与 main 使用）
+from common import record, TARGET_IDENTITIES, _find_config
+
+# 读取 config 中本轮目标设备（config.TARGET_IDENTITY）对应的匹配参数，供 PROBE format 与 main 使用
 TARGET_MAC = ''
 TARGET_IDENTITY = ''
-TARGET_PREFIX = ''
-for _cfg in config.DEVICES:
-    if _cfg.get("enabled", True):
+if TARGET_IDENTITIES:
+    _cfg = _find_config(TARGET_IDENTITIES[0])
+    if _cfg:
         TARGET_MAC = (_cfg.get("mac") or "").strip().upper()
         TARGET_IDENTITY = (_cfg.get("identity") or "").strip().upper()
-        TARGET_PREFIX = _cfg.get("name_prefix") or ""
-        break
-
-from common import record
 
 
 def _key(out, key):
@@ -56,7 +54,7 @@ def _key(out, key):
 
 # 子进程探针：诊断 -> scan -> 按 config 匹配参数匹配 -> requireSensor -> 在 Disconnected 状态调用三个命令
 PROBE = (
-    "import sys, re\n"
+    "import sys, re, time\n"
     "sys.path.insert(0, {automation_dir!r})\n"
     "from sensor import *\n"
     "def _identity_of(name):\n"
@@ -66,21 +64,24 @@ PROBE = (
     "print('VERSION=' + ctrl.getVersion(), flush=True)\n"
     "print('BACKEND=' + ctrl.getBLEBackendName(), flush=True)\n"
     "print('ISENABLE=' + str(ctrl.isEnable), flush=True)\n"
-    "devices = ctrl.scan({scan_ms})\n"
-    "print('SCANNED=' + str([(getattr(d,'Name','?'), (getattr(d,'Address','') or '').upper()) for d in devices]), flush=True)\n"
     "target = None\n"
-    "for d in devices:\n"
-    "    addr = (getattr(d, 'Address', '') or '').upper()\n"
-    "    name = getattr(d, 'Name', '') or ''\n"
-    "    if {mac!r} and addr == {mac!r}:\n"
-    "        target = d\n"
+    "for _attempt in range(1, 4):\n"
+    "    devices = ctrl.scan({scan_ms})\n"
+    "    print('SCANNED=' + str([(getattr(d,'Name','?'), (getattr(d,'Address','') or '').upper()) for d in devices]), flush=True)\n"
+    "    for d in devices:\n"
+    "        addr = (getattr(d, 'Address', '') or '').upper()\n"
+    "        name = getattr(d, 'Name', '') or ''\n"
+    "        if {mac!r} and addr == {mac!r}:\n"
+    "            target = d\n"
+    "            break\n"
+    "        if {identity!r} and _identity_of(name) == {identity!r}:\n"
+    "            target = d\n"
+    "            break\n"
+    "    if target is not None:\n"
     "        break\n"
-    "    if {identity!r} and _identity_of(name) == {identity!r}:\n"
-    "        target = d\n"
-    "        break\n"
-    "    if not {mac!r} and not {identity!r} and {prefix!r} and name.startswith({prefix!r}):\n"
-    "        target = d\n"
-    "        break\n"
+    "    if _attempt < 3:\n"
+    "        print('RETRY=' + str(_attempt), flush=True)\n"
+    "        time.sleep(10)\n"
     "if target is None:\n"
     "    print('NOTARGET=1', flush=True)\n"
     "    sys.exit(0)\n"
@@ -108,7 +109,6 @@ PROBE = (
     pwr=config.POWER_REFRESH_INTERVAL_MS,
     mac=TARGET_MAC,
     identity=TARGET_IDENTITY,
-    prefix=TARGET_PREFIX,
 )
 
 
@@ -120,14 +120,14 @@ def main():
     print("\n[前置条件]", flush=True)
     print("  - 主机(电脑)：蓝牙已开启", flush=True)
     print("  - 待测设备：上电、在范围内", flush=True)
-    print(f"  - config 启用目标：identity={TARGET_IDENTITY or '(空)'} prefix={TARGET_PREFIX or '(空)'}", flush=True)
+    print(f"  - config 启用目标：identity={TARGET_IDENTITY or '(空)'}", flush=True)
 
-    input("\n>>> [人工操作] 请确认上方 config 启用的目标设备（identity/prefix）与待测设备一致，"
+    input("\n>>> [人工操作] 请确认上方 config 启用的目标设备（identity）与待测设备一致，"
           "其余设备已在 config 中 enabled=False 关闭，且待测设备已【开机】在范围内，完成后按回车继续 ...")
 
     results = []
 
-    print(f"\n[配置] 目标匹配参数 mac={TARGET_MAC!r} identity={TARGET_IDENTITY!r} prefix={TARGET_PREFIX!r}", flush=True)
+    print(f"\n[配置] 目标匹配参数 mac={TARGET_MAC!r} identity={TARGET_IDENTITY!r}", flush=True)
 
     # 子进程：Disconnected 状态调用三个命令
     print("[执行] 子进程在 Disconnected 状态调用 init/setParam/startDataNotification ...", flush=True)

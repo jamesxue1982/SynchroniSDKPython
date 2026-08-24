@@ -28,7 +28,7 @@ sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
 import config
-from common import record, _identity_of, match_target
+from common import record, scan_and_match
 
 
 def main():
@@ -93,19 +93,12 @@ def main():
            "SensorController.isScanning == False", f"SensorController.isScanning == {is_scanning}")
 
     # ---- 增强：扫描发现设备并尝试连接 ----
-    print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
-    try:
-        devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
-        n = len(devices) if devices else 0
-    except Exception as e:
-        devices = []
-        n = 0
-        print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
+    target, devices = scan_and_match(ctrl, scan_ms=config.SCAN_TIMEOUT_MS)
+    n = len(devices) if devices else 0
     print(f"[扫描] 发现 {n} 台设备:", flush=True)
     for d in devices:
         print(f"  - {getattr(d, 'Name', '?')} {getattr(d, 'Address', '?')}", flush=True)
 
-    target = match_target(devices)
     if target is None:
         print("[检查4] 未匹配到 config 中启用的设备（OB6000C/80F3）", flush=True)
         record(results, "SensorController.scan 发现目标设备 OB6000C", False,

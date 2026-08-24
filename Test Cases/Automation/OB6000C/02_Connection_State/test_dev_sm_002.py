@@ -28,7 +28,7 @@ sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
 import config
-from common import record, _identity_of, match_target
+from common import record, scan_and_match
 
 
 def main():
@@ -57,13 +57,7 @@ def main():
     # ---- 阶段 1：设备开机时扫描获取 BLEDevice ----
     input("\n>>> [人工操作] 请确认待测设备 OB6000C 已【开机】且在范围内，完成后按回车继续 ...")
 
-    print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
-    try:
-        devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
-    except Exception as e:
-        devices = None
-        print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    target = match_target(devices)
+    target, devices = scan_and_match(ctrl, scan_ms=config.SCAN_TIMEOUT_MS)
 
     if target is None:
         print("[FAIL] 未匹配到 config 中启用的设备（OB6000C/80F3）", flush=True)

@@ -39,7 +39,7 @@ sys.path.insert(0, AUTOMATION_DIR)
 from sensor import *
 import config
 import common
-from common import record, _identity_of, match_target
+from common import record, _identity_of, scan_and_match
 
 COLLECT_SECONDS = 3  # 起流后采集时长（秒），确保 bin 有数据且 replay_duration > 0
 REQUIRED_KEYS = ["device_mac", "device_name", "chip_type", "replay_duration"]
@@ -129,19 +129,13 @@ def main():
     # 扫描匹配
     print(f"\n[扫描] 目标 identity: {common.TARGET_IDENTITIES}", flush=True)
     print(f"[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
-    try:
-        devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
-    except Exception as e:
-        devices = None
-        print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
+    target, devices = scan_and_match(ctrl, scan_ms=config.SCAN_TIMEOUT_MS)
     print(f"[扫描] 扫描到 {len(devices) if devices else 0} 台设备:", flush=True)
     if devices:
         for d in devices:
             n = getattr(d, 'Name', '?')
             a = getattr(d, 'Address', '?')
             print(f"  {n} {a} identity={_identity_of(n)}", flush=True)
-    target = match_target(devices)
-
     if target is None:
         print("[FAIL] 未匹配到目标设备", flush=True)
         record(results, "scan 匹配到目标设备", False, "scan 返回含目标设备", "未匹配到目标")

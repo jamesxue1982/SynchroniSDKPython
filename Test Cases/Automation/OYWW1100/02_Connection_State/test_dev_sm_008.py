@@ -31,7 +31,7 @@ DISCONNECT_TIMEOUT = 60     # 断链检测超时（秒）
 RECONNECT_TIMEOUT = 120     # 自动重连恢复超时（秒）
 TRANSFER_RECOVER_TIMEOUT = 20  # 恢复 Ready 后等待起流恢复的超时（秒）
 
-from common import record, _identity_of, match_target
+from common import record, scan_and_match
 
 
 def _wait_until(cond, timeout, interval=0.5, what=""):
@@ -69,13 +69,9 @@ def main():
         ctrl.terminate()
         return
 
-    # 扫描匹配
-    print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
-    try:
-        devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
-    except Exception as e:
-        devices = None
-        print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
+    # 扫描匹配（未匹配到时自动重试，最多 3 次，间隔 10s）
+    print(f"\n[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS})，未匹配时最多重试 3 次（间隔 10s）...", flush=True)
+    target, devices = scan_and_match(ctrl, scan_ms=config.SCAN_TIMEOUT_MS)
 
     if devices is None:
         print("[扫描] 扫描结果为空（scan 返回 None）", flush=True)
@@ -83,8 +79,6 @@ def main():
         print(f"[扫描] 发现 {len(devices)} 台设备：", flush=True)
         for d in devices:
             print(f"    - Name={getattr(d, 'Name', '?')!r}  Address={getattr(d, 'Address', '?')!r}", flush=True)
-
-    target = match_target(devices)
 
     if target is None:
         print(f"[FAIL] 未匹配到 config 中启用的设备（identity={config.TARGET_IDENTITY}）", flush=True)

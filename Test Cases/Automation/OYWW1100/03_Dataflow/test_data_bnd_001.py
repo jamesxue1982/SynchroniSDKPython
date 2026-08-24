@@ -51,8 +51,9 @@ from sensor import *
 
 val = int(sys.argv[1])
 target_identity = sys.argv[2].strip().upper()
-scan_ms = int(sys.argv[3])
-power_ms = int(sys.argv[4])
+target_mac = sys.argv[3].strip().upper()
+scan_ms = int(sys.argv[4])
+power_ms = int(sys.argv[5])
 
 def _identity(name):
     name = name or ""
@@ -70,7 +71,11 @@ except Exception as e:
 
 target = None
 for d in (devices or []):
-    if _identity(getattr(d, "Name", "")) == target_identity:
+    addr = (getattr(d, "Address", "") or "").upper()
+    if target_mac and addr == target_mac:
+        target = d
+        break
+    if target_identity and _identity(getattr(d, "Name", "")) == target_identity:
         target = d
         break
 if target is None:
@@ -108,13 +113,24 @@ except Exception:
     pass
 '''
 
-from common import record
+from common import record, TARGET_IDENTITIES, _find_config
+
+
+def _target_params():
+    """返回本轮目标设备的 (identity, mac)，供 PROBE 匹配。"""
+    if not TARGET_IDENTITIES:
+        return '', ''
+    tid = TARGET_IDENTITIES[0]
+    cfg = _find_config(tid)
+    mac = (cfg.get("mac") or "").strip().upper() if cfg else ""
+    return tid, mac
 
 
 def _probe(value):
     """在子进程完成 connect+init(value)，返回 (returncode, stdout, stderr)。"""
+    identity, mac = _target_params()
     args = [sys.executable, '-c', PROBE, str(value),
-            config.TARGET_IDENTITY, str(config.SCAN_TIMEOUT_MS),
+            identity, mac, str(config.SCAN_TIMEOUT_MS),
             str(config.POWER_REFRESH_INTERVAL_MS)]
     try:
         r = subprocess.run(args, capture_output=True, text=True, timeout=90)

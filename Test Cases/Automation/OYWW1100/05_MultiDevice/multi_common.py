@@ -16,28 +16,17 @@ sys.path.insert(0, AUTOMATION_DIR)
 from sensor import *
 import config
 import common
-from common import record, _identity_of, match_target
-
-
-def match_all_targets(devices):
-    """匹配所有目标设备（按 config.TARGET_IDENTITIES），返回 (BLEDevice, identity) 列表。"""
-    if not devices:
-        return []
-    matched = []
-    for tid in common.TARGET_IDENTITIES:
-        d = match_target(devices, target_identity=tid)
-        if d:
-            matched.append((d, tid))
-    return matched
+from common import record, scan_and_match_all
 
 
 def connect_and_init_all(ctrl, matched, results):
     """连接并初始化所有匹配到的设备，返回 SensorProfile 列表。
-    
+
+    matched 元素为 (identity, BLEDevice)。
     如果某台设备连接或初始化失败，记录 FAIL 并中断（返回空列表）。
     """
     sensors = []
-    for device, tid in matched:
+    for tid, device in matched:
         sensor = ctrl.requireSensor(device)
         if sensor is None:
             record(results, f"requireSensor({tid})", False,
@@ -105,8 +94,8 @@ def disconnect_all(sensors):
 def check_device_count(results, matched, required=2):
     """检查匹配到的设备数量是否满足要求，不足则记录 SKIP。"""
     if len(matched) < required:
-        found_list = [(getattr(d, 'Name', '?'), getattr(d, 'Address', '?'), tid)
-                      for d, tid in matched]
+        found_list = [(tid, getattr(d, 'Name', '?'), getattr(d, 'Address', '?'))
+                      for tid, d in matched]
         msg = f"需要 {required} 台设备，实际匹配到 {len(matched)} 台: {found_list}"
         record(results, f"设备数量检查（需要≥{required}台）", None,
                f"匹配到 ≥{required} 台设备", msg)

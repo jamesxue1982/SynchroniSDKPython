@@ -32,7 +32,7 @@ sys.path.insert(0, AUTOMATION_DIR)
 
 from sensor import *
 import config
-from common import record, _identity_of, match_target
+from common import record, scan_and_match, async_scan_and_match
 
 COLLECT_SECONDS = 2
 
@@ -63,13 +63,7 @@ async def main_async():
         return
 
     # 扫描匹配
-    print(f"\n[扫描] await ctrl.asyncScan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
-    try:
-        devices = await ctrl.asyncScan(config.SCAN_TIMEOUT_MS)
-    except Exception as e:
-        devices = None
-        print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    target = match_target(devices)
+    target, devices = await async_scan_and_match(ctrl, scan_ms=config.SCAN_TIMEOUT_MS)
 
     if target is None:
         print("[FAIL] 未匹配到 config 中启用的设备", flush=True)

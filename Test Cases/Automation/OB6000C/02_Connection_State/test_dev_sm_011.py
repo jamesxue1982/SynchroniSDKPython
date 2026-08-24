@@ -37,7 +37,7 @@ import common
 READY_TIMEOUT = 15     # 单台连接后等待 Ready 超时（秒）
 COLLECT_SECONDS = 3    # 起流后采集时长（秒）
 
-from common import record, _identity_of, match_target
+from common import record, _identity_of, scan_and_match_all
 
 
 def _tag_of(d):
@@ -45,24 +45,6 @@ def _tag_of(d):
     name = getattr(d, 'Name', '') or ''
     ident = _identity_of(name)
     return ident or (getattr(d, 'Address', '') or '?').upper()
-
-
-def _match_all_targets(devices):
-    """返回匹配 common.TARGET_IDENTITIES 中所有设备的目标列表 [(identity, device)]（去重）。"""
-    matched = []
-    seen = set()
-    for tid in common.TARGET_IDENTITIES:
-        for d in (devices or []):
-            addr = (getattr(d, 'Address', '') or '').upper()
-            name = getattr(d, 'Name', '') or ''
-            if _identity_of(name) == tid:
-                key = addr or name
-                if key and key in seen:
-                    continue
-                seen.add(key)
-                matched.append((tid, d))
-                break
-    return matched
 
 
 def _wait_until(cond, timeout, interval=0.5, what=""):
@@ -104,19 +86,7 @@ def main():
 
     # 扫描匹配
     print(f"\n[扫描] 目标 identity: {common.TARGET_IDENTITIES}", flush=True)
-    print(f"[扫描] SensorController.scan({config.SCAN_TIMEOUT_MS}) ...", flush=True)
-    try:
-        devices = ctrl.scan(config.SCAN_TIMEOUT_MS)
-    except Exception as e:
-        devices = None
-        print(f"[扫描] 抛异常 {type(e).__name__}: {e}", flush=True)
-    print(f"[扫描] 扫描到 {len(devices) if devices else 0} 台设备:", flush=True)
-    if devices:
-        for d in devices:
-            n = getattr(d, 'Name', '?')
-            a = getattr(d, 'Address', '?')
-            print(f"  {n} {a} identity={_identity_of(n)}", flush=True)
-    matched = _match_all_targets(devices)
+    matched, devices = scan_and_match_all(ctrl, scan_ms=config.SCAN_TIMEOUT_MS, required=2)
     print(f"[扫描] 匹配到 {len(matched)} 台目标设备", flush=True)
 
     if len(matched) < 2:
